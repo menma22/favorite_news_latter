@@ -1,0 +1,6 @@
+Python Executable: C:\Users\mahim\AppData\Local\Programs\Python\Python313\python.exe
+Module File: C:\Users\mahim\AppData\Local\Programs\Python\Python313\Lib\site-packages\youtube_transcript_api\__init__.py
+Version: 1.2.3
+Attributes: ['__class__', '__delattr__', '__dict__', '__dir__', '__doc__', '__eq__', '__firstlineno__', '__format__', '__ge__', '__getattribute__', '__getstate__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__static_attributes__', '__str__', '__subclasshook__', '__weakref__', 'fetch', 'list']
+Has list_transcripts: False
+Has get_transcript: False

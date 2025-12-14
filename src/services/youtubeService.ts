@@ -109,3 +109,59 @@ const fetchChannelById = async (id: string, apiKey: string): Promise<Partial<Cha
         return null;
     }
 }
+
+export const fetchVideoInfo = async (url: string): Promise<{ title: string, thumbnailUrl: string, channelTitle: string } | null> => {
+    const apiKey = getCredential('YOUTUBE_API_KEY');
+    if (!apiKey) return null;
+
+    let videoId = '';
+    try {
+        const urlObj = new URL(url);
+        if (urlObj.hostname.includes('youtu.be')) {
+            videoId = urlObj.pathname.slice(1);
+        } else if (urlObj.hostname.includes('youtube.com')) {
+            videoId = urlObj.searchParams.get('v') || '';
+        }
+    } catch {
+        return null;
+    }
+
+    if (!videoId) return null;
+
+    try {
+        const response = await fetch(
+            `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`
+        );
+        if (!response.ok) throw new Error('Failed to fetch video');
+
+        const data = await response.json();
+        if (!data.items || data.items.length === 0) return null;
+
+        const snippet = data.items[0].snippet;
+        return {
+            title: snippet.title,
+            thumbnailUrl: snippet.thumbnails.maxres?.url || snippet.thumbnails.high?.url || snippet.thumbnails.medium?.url,
+            channelTitle: snippet.channelTitle
+        };
+    } catch (e) {
+        console.error(e);
+        return null;
+    }
+};
+
+export const fetchTranscript = async (url: string): Promise<string | null> => {
+    try {
+        // Use local proxy server
+        const response = await fetch(`http://localhost:3001/transcript?url=${encodeURIComponent(url)}`);
+        if (!response.ok) {
+            throw new Error(`Proxy error: ${response.status}`);
+        }
+        const data = await response.json();
+        return data.transcript;
+    } catch (error) {
+        console.error('Failed to fetch transcript via proxy:', error);
+        return null;
+    }
+};
+
+

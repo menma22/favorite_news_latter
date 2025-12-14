@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Letter, Channel } from '../types';
 import { generateDeepDive } from '../services/geminiService';
+import { fetchTranscript } from '../services/youtubeService';
 import { FileText, Loader2, PlayCircle, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Language, translations } from '../lib/i18n';
@@ -28,7 +29,27 @@ const LetterCard: React.FC<LetterCardProps> = ({ letter, channel, language, onUp
         setError(null);
 
         try {
-            const content = await generateDeepDive(letter.videoUrl, language);
+            // Fetch transcript first
+            let transcript: string | null = null;
+            try {
+                console.log(`[DeepDive] Fetching transcript for: ${letter.videoUrl}`);
+                transcript = await fetchTranscript(letter.videoUrl);
+                console.log(`[DeepDive] Transcript result length: ${transcript ? transcript.length : 'null'}`);
+                console.log(`[DeepDive] Transcript preview: ${transcript ? transcript.substring(0, 100) : 'N/A'}`);
+            } catch (e) {
+                console.warn('[DeepDive] Transcript fetch failed', e);
+            }
+
+            if (!transcript || !transcript.trim()) {
+                console.error('[DeepDive] Transcript is empty or null. Aborting generation.');
+                setError(language === 'ja'
+                    ? "申し訳ありません。この動画の文字起こしデータが取得できないため、詳細レポートを生成できませんでした。"
+                    : "Sorry, we could not retrieve the transcript for this video, so the report could not be generated.");
+                setIsLoading(false);
+                return;
+            }
+
+            const content = await generateDeepDive(letter.videoUrl, language, transcript);
             onUpdateLetter({
                 ...letter,
                 deepDiveContent: content,

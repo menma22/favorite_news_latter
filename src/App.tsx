@@ -7,7 +7,7 @@ import { supabase } from './lib/supabase';
 import { Session } from '@supabase/supabase-js';
 import { translations, Language } from './lib/i18n';
 import { getCredential, setStoredCredential, getStoredCredential } from './lib/credentials';
-import { fetchChannelInfo } from './services/youtubeService';
+import { fetchChannelInfo, fetchVideoInfo } from './services/youtubeService';
 
 // --- MOCK DATA FOR FALLBACK ---
 const MOCK_CHANNELS_JA: Channel[] = [
@@ -168,14 +168,21 @@ const GeneratorView = ({ language }: { language: Language }) => {
         e.preventDefault();
         if (!url) return;
 
-        // Mocking a result for immediate feedback UI structure, ideally calls geminiService here directly or creates a temporary Letter
+        let videoInfo = { title: `Report for: ${url}`, thumbnailUrl: '', channelTitle: 'Unknown Channel' };
+        try {
+            const info = await fetchVideoInfo(url);
+            if (info) videoInfo = info;
+        } catch (e) {
+            console.error('Failed to fetch video info', e);
+        }
+
         const tempId = crypto.randomUUID();
         const newLetter: Letter = {
             id: tempId,
             channelId: 'temp',
-            title: `Report for: ${url}`,
+            title: videoInfo.title,
             videoUrl: url,
-            thumbnailUrl: '',
+            thumbnailUrl: videoInfo.thumbnailUrl,
             summary: language === 'ja' ? 'レポートを生成するには「詳細レポート」をクリックしてください。' : 'Click "Read Report" to generate the content.',
             date: new Date().toISOString(),
             isDeepDiveAvailable: false,
