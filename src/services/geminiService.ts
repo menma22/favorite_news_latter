@@ -2,7 +2,7 @@
 import { getCredential } from '../lib/credentials';
 import type { Language } from '../types';
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-pro:generateContent';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-think:generateContent';
 
 export const generateDeepDive = async (
     videoUrl: string,
@@ -68,7 +68,7 @@ A section summarizing the video content for instant understanding of the key poi
             ],
             generationConfig: {
                 temperature: 0.7,
-                maxOutputTokens: 4096,
+                maxOutputTokens: 8192,
             },
         }),
     });
