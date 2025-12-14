@@ -1,595 +1,671 @@
-// メインアプリケーション
 import React, { useState, useEffect } from 'react';
-import type { Language, Channel, Letter, User } from './types';
-import { t, getStoredLanguage, setStoredLanguage } from './lib/i18n';
-import { supabase, isSupabaseConfigured } from './lib/supabase';
+import { Channel, Letter, ViewMode } from './types';
 import LetterCard from './components/LetterCard';
+import { Plus, Inbox, Search, Youtube, Bell, LogOut, Globe, AlertCircle, CheckCircle2, Eye, EyeOff, ArrowLeft, Settings, Sparkles } from 'lucide-react';
+import clsx from 'clsx';
+import { supabase } from './lib/supabase';
+import { Session } from '@supabase/supabase-js';
+import { translations, Language } from './lib/i18n';
+import { getCredential, setStoredCredential, getStoredCredential } from './lib/credentials';
+import { fetchChannelInfo } from './services/youtubeService';
 
-type Tab = 'register' | 'letterbox' | 'channels';
-type AuthMode = 'login' | 'signup';
+// --- MOCK DATA FOR FALLBACK ---
+const MOCK_CHANNELS_JA: Channel[] = [
+    { id: 'c1', name: 'Veritasium', avatarUrl: 'https://picsum.photos/seed/veritasium/100/100', description: '真実の要素を探求するサイエンスチャンネル。' },
+    { id: 'c2', name: 'Lex Fridman', avatarUrl: 'https://picsum.photos/seed/lex/100/100', description: 'AI、意識、愛、そして権力についての深い対話。' },
+];
 
-// デモデータ
-const createDemoData = (lang: Language): { channels: Channel[]; letters: Letter[] } => {
-    const now = new Date();
-    const yesterday = new Date(now);
-    yesterday.setDate(yesterday.getDate() - 1);
+const MOCK_LETTERS_JA: Letter[] = [
+    { id: 'l1', channelId: 'c1', title: 'AIの非線形性がもたらす潜在的な危険性', videoUrl: 'https://www.youtube.com/watch?v=1', thumbnailUrl: 'https://picsum.photos/seed/ai-danger/600/340', summary: 'AIパラメータのわずかな変化が、どのように予期せぬ劇的な振る舞いにつながるかを探求します。', date: new Date().toISOString(), isDeepDiveAvailable: false, isRead: false },
+];
 
-    const channels: Channel[] = [
-        {
-            id: 'demo-1',
-            user_id: 'demo',
-            name: lang === 'ja' ? 'テック解説チャンネル' : 'Tech Explained',
-            avatar_url: 'https://picsum.photos/seed/tech1/100/100',
-            description: lang === 'ja' ? 'テクノロジーの最新情報をわかりやすく解説' : 'Making technology easy to understand',
-            created_at: yesterday.toISOString(),
-        },
-        {
-            id: 'demo-2',
-            user_id: 'demo',
-            name: lang === 'ja' ? 'サイエンス探求' : 'Science Quest',
-            avatar_url: 'https://picsum.photos/seed/science1/100/100',
-            description: lang === 'ja' ? '科学の不思議を一緒に探求' : 'Exploring the wonders of science',
-            created_at: yesterday.toISOString(),
-        },
-    ];
+const MOCK_CHANNELS_EN: Channel[] = [
+    { id: 'c1', name: 'Veritasium', avatarUrl: 'https://picsum.photos/seed/veritasium/100/100', description: 'The element of truth.' },
+    { id: 'c2', name: 'Lex Fridman', avatarUrl: 'https://picsum.photos/seed/lex/100/100', description: 'Conversations about the nature of intelligence.' },
+];
 
-    const letters: Letter[] = [
-        {
-            id: 'letter-1',
-            user_id: 'demo',
-            channel_id: 'demo-1',
-            channel_name: channels[0].name,
-            channel_avatar: channels[0].avatar_url,
-            title: lang === 'ja' ? 'AIの未来: 2024年の最新トレンド' : 'The Future of AI: 2024 Trends',
-            video_url: 'https://youtube.com/watch?v=demo1',
-            thumbnail_url: 'https://picsum.photos/seed/ai2024/640/360',
-            summary: lang === 'ja'
-                ? 'AIの発展は驚くべき速さで進んでいます。この動画では、2024年に注目すべきAIトレンドを徹底解説。生成AI、マルチモーダルAI、エージェントAIなど、最前線の技術を紹介します。'
-                : 'AI is advancing at an incredible pace. This video covers the key AI trends to watch in 2024, from generative AI to multimodal systems and autonomous agents.',
-            deep_dive_content: null,
-            is_deep_dive_available: false,
-            is_read: false,
-            created_at: now.toISOString(),
-        },
-        {
-            id: 'letter-2',
-            user_id: 'demo',
-            channel_id: 'demo-2',
-            channel_name: channels[1].name,
-            channel_avatar: channels[1].avatar_url,
-            title: lang === 'ja' ? '量子コンピューターが変える世界' : 'How Quantum Computers Will Change the World',
-            video_url: 'https://youtube.com/watch?v=demo2',
-            thumbnail_url: 'https://picsum.photos/seed/quantum1/640/360',
-            summary: lang === 'ja'
-                ? '量子コンピューターの仕組みから実用化までを解説。従来のコンピューターでは不可能だった計算が可能になる未来について考察します。'
-                : 'From the basics of quantum computing to real-world applications. Explore how quantum computers will solve problems classical computers never could.',
-            deep_dive_content: null,
-            is_deep_dive_available: false,
-            is_read: false,
-            created_at: now.toISOString(),
-        },
-        {
-            id: 'letter-3',
-            user_id: 'demo',
-            channel_id: 'demo-1',
-            channel_name: channels[0].name,
-            channel_avatar: channels[0].avatar_url,
-            title: lang === 'ja' ? 'Web3とは何か？初心者向け完全ガイド' : 'What is Web3? A Complete Beginner\'s Guide',
-            video_url: 'https://youtube.com/watch?v=demo3',
-            thumbnail_url: 'https://picsum.photos/seed/web3/640/360',
-            summary: lang === 'ja'
-                ? 'Web3の基礎から応用まで、初心者にもわかりやすく解説。ブロックチェーン、分散型アプリケーション、トークンエコノミーの概念を学びましょう。'
-                : 'Web3 explained from basics to advanced concepts. Learn about blockchain, decentralized applications, and the token economy.',
-            deep_dive_content: null,
-            is_deep_dive_available: false,
-            is_read: false,
-            created_at: yesterday.toISOString(),
-        },
-    ];
+const MOCK_LETTERS_EN: Letter[] = [
+    { id: 'l1', channelId: 'c1', title: 'The Potentially Dangerous Non-Linearity of AI', videoUrl: 'https://www.youtube.com/watch?v=1', thumbnailUrl: 'https://picsum.photos/seed/ai-danger/600/340', summary: 'An exploration into how small changes in AI parameters can lead to drastically unexpected behaviors.', date: new Date().toISOString(), isDeepDiveAvailable: false, isRead: false },
+];
 
-    return { channels, letters };
-};
+// --- COMPONENTS ---
 
-const App: React.FC = () => {
-    // 状態管理
-    const [language, setLanguage] = useState<Language | null>(getStoredLanguage());
-    const [user, setUser] = useState<User | null>(null);
-    const [authMode, setAuthMode] = useState<AuthMode>('login');
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
-    const [authError, setAuthError] = useState<string | null>(null);
-    const [authSuccess, setAuthSuccess] = useState<string | null>(null);
-    const [isLoading, setIsLoading] = useState(false);
-
-    const [activeTab, setActiveTab] = useState<Tab>('letterbox');
-    const [channels, setChannels] = useState<Channel[]>([]);
-    const [letters, setLetters] = useState<Letter[]>([]);
-    const [selectedChannel, setSelectedChannel] = useState<Channel | null>(null);
-
-    // チャンネル登録フォーム
-    const [channelUrl, setChannelUrl] = useState('');
-    const [channelName, setChannelName] = useState('');
-
-    // 初期化
-    useEffect(() => {
-        if (language) {
-            // Demo mode: Supabase未設定の場合はデモデータを使用
-            if (!isSupabaseConfigured()) {
-                const demo = createDemoData(language);
-                setChannels(demo.channels);
-                setLetters(demo.letters);
-            }
-        }
-    }, [language]);
-
-    // Supabaseの認証状態を監視
-    useEffect(() => {
-        if (!supabase) return;
-
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            if (session?.user) {
-                setUser({ id: session.user.id, email: session.user.email || '' });
-                loadUserData(session.user.id);
-            }
-        });
-
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-            if (session?.user) {
-                setUser({ id: session.user.id, email: session.user.email || '' });
-                loadUserData(session.user.id);
-            } else {
-                setUser(null);
-                setChannels([]);
-                setLetters([]);
-            }
-        });
-
-        return () => subscription.unsubscribe();
-    }, []);
-
-    // ユーザーデータの読み込み
-    const loadUserData = async (userId: string) => {
-        if (!supabase) return;
-
-        try {
-            // チャンネルを取得
-            const { data: channelsData } = await supabase
-                .from('channels')
-                .select('*')
-                .eq('user_id', userId)
-                .order('created_at', { ascending: false });
-
-            if (channelsData) {
-                setChannels(channelsData);
-            }
-
-            // レターを取得
-            const { data: lettersData } = await supabase
-                .from('letters')
-                .select('*')
-                .eq('user_id', userId)
-                .order('created_at', { ascending: false });
-
-            if (lettersData) {
-                // チャンネル情報を付与
-                const lettersWithChannels = lettersData.map((letter: Letter) => {
-                    const channel = channelsData?.find((c: Channel) => c.id === letter.channel_id);
-                    return {
-                        ...letter,
-                        channel_name: channel?.name || '',
-                        channel_avatar: channel?.avatar_url || '',
-                    };
-                });
-                setLetters(lettersWithChannels);
-            }
-        } catch (error) {
-            console.error('Error loading user data:', error);
-        }
-    };
-
-    // 言語選択
-    const handleLanguageSelect = (lang: Language) => {
-        setLanguage(lang);
-        setStoredLanguage(lang);
-    };
-
-    // ログイン処理
-    const handleAuth = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!supabase) return;
-
-        setIsLoading(true);
-        setAuthError(null);
-        setAuthSuccess(null);
-
-        try {
-            if (authMode === 'login') {
-                const { error } = await supabase.auth.signInWithPassword({ email, password });
-                if (error) throw error;
-            } else {
-                const { error } = await supabase.auth.signUp({ email, password });
-                if (error) throw error;
-                setAuthSuccess(t('signUpSuccess', language!));
-            }
-        } catch (error) {
-            setAuthError(error instanceof Error ? error.message : t('loginError', language!));
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    // ログアウト
-    const handleLogout = async () => {
-        if (supabase) {
-            await supabase.auth.signOut();
-        }
-        // デモモードの場合はデータをクリア
-        if (!isSupabaseConfigured()) {
-            setChannels([]);
-            setLetters([]);
-        }
-        setUser(null);
-    };
-
-    // チャンネル登録
-    const handleRegisterChannel = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!channelName.trim()) return;
-
-        const newChannel: Channel = {
-            id: `channel-${Date.now()}`,
-            user_id: user?.id || 'demo',
-            name: channelName,
-            avatar_url: `https://picsum.photos/seed/${Date.now()}/100/100`,
-            description: channelUrl || '',
-            created_at: new Date().toISOString(),
-        };
-
-        // Supabaseに保存
-        if (supabase && user) {
-            const { data, error } = await supabase
-                .from('channels')
-                .insert([{
-                    user_id: user.id,
-                    name: channelName,
-                    avatar_url: newChannel.avatar_url,
-                    description: channelUrl,
-                }])
-                .select()
-                .single();
-
-            if (!error && data) {
-                newChannel.id = data.id;
-            }
-        }
-
-        setChannels([newChannel, ...channels]);
-
-        // ウェルカムレターを作成
-        const welcomeLetter: Letter = {
-            id: `letter-${Date.now()}`,
-            user_id: user?.id || 'demo',
-            channel_id: newChannel.id,
-            channel_name: newChannel.name,
-            channel_avatar: newChannel.avatar_url,
-            title: language === 'ja'
-                ? `${newChannel.name}をフォローしました`
-                : `Now following ${newChannel.name}`,
-            video_url: channelUrl || '#',
-            thumbnail_url: `https://picsum.photos/seed/${Date.now()}/640/360`,
-            summary: language === 'ja'
-                ? `${newChannel.name}の新しい動画が投稿されると、ここにレターが届きます。お楽しみに！`
-                : `You'll receive letters here when ${newChannel.name} posts new videos. Stay tuned!`,
-            deep_dive_content: null,
-            is_deep_dive_available: false,
-            is_read: false,
-            created_at: new Date().toISOString(),
-        };
-
-        // Supabaseに保存
-        if (supabase && user) {
-            await supabase.from('letters').insert([{
-                user_id: user.id,
-                channel_id: newChannel.id,
-                title: welcomeLetter.title,
-                video_url: welcomeLetter.video_url,
-                thumbnail_url: welcomeLetter.thumbnail_url,
-                summary: welcomeLetter.summary,
-            }]);
-        }
-
-        setLetters([welcomeLetter, ...letters]);
-        setChannelName('');
-        setChannelUrl('');
-        setActiveTab('letterbox');
-    };
-
-    // チャンネル削除
-    const handleDeleteChannel = async (channelId: string) => {
-        if (supabase && user) {
-            await supabase.from('channels').delete().eq('id', channelId);
-        }
-        setChannels(channels.filter((c) => c.id !== channelId));
-        setLetters(letters.filter((l) => l.channel_id !== channelId));
-    };
-
-    // DeepDive生成完了時
-    const handleDeepDiveGenerated = (letterId: string, content: string) => {
-        setLetters(
-            letters.map((l) =>
-                l.id === letterId ? { ...l, deep_dive_content: content, is_deep_dive_available: true } : l
-            )
-        );
-    };
-
-    // 今日のレターと過去のレターを分離
-    const today = new Date().toDateString();
-    const todayLetters = letters.filter((l) => new Date(l.created_at).toDateString() === today);
-    const pastLetters = letters.filter((l) => new Date(l.created_at).toDateString() !== today);
-
-    // ========================================
-    // レンダリング
-    // ========================================
-
-    // 言語未選択の場合
-    if (!language) {
-        return (
-            <div className="language-selection">
-                <h1>Briefly.</h1>
-                <p>Select your language / 言語を選択してください</p>
-                <div className="language-buttons">
-                    <button className="language-btn" onClick={() => handleLanguageSelect('ja')}>
-                        日本語
-                    </button>
-                    <button className="language-btn" onClick={() => handleLanguageSelect('en')}>
-                        English
-                    </button>
-                </div>
-            </div>
-        );
-    }
-
-    // 未ログインの場合（Supabase設定時のみ）
-    if (isSupabaseConfigured() && !user) {
-        return (
-            <div className="login-screen">
-                <div className="login-container">
-                    <h1 className="login-logo">{t('appName', language)}</h1>
-                    <p className="login-tagline">{t('tagline', language)}</p>
-
-                    <form className="login-form" onSubmit={handleAuth}>
-                        <input
-                            type="email"
-                            className="login-input"
-                            placeholder={t('email', language)}
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            required
-                        />
-                        <input
-                            type="password"
-                            className="login-input"
-                            placeholder={t('password', language)}
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            required
-                            minLength={6}
-                        />
-                        <button type="submit" className="login-btn" disabled={isLoading}>
-                            {isLoading
-                                ? t('loading', language)
-                                : authMode === 'login'
-                                    ? t('login', language)
-                                    : t('signUp', language)}
-                        </button>
-                    </form>
-
-                    {authError && <p className="login-error">{authError}</p>}
-                    {authSuccess && <p className="login-success">{authSuccess}</p>}
-
-                    <p className="login-switch">
-                        {authMode === 'login' ? t('noAccount', language) : t('hasAccount', language)}{' '}
-                        <button onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}>
-                            {authMode === 'login' ? t('signUp', language) : t('login', language)}
-                        </button>
-                    </p>
-                </div>
-            </div>
-        );
-    }
-
-    // Supabase未設定でもデモモードで表示
-    // メインアプリ
+// 0. Language Selection View
+const LanguageSelectionView = ({ onSelect }: { onSelect: (lang: Language) => void }) => {
     return (
-        <div className="app-container">
-            {/* ヘッダー */}
-            <header className="app-header">
-                <h1 className="app-logo">{t('appName', language)}</h1>
-                <div className="header-actions">
+        <div className="min-h-screen bg-paper flex items-center justify-center p-4 animate-in fade-in duration-700">
+            <div className="bg-white p-10 md:p-16 shadow-sharp max-w-lg w-full border border-ink text-center">
+                <div className="w-16 h-16 bg-ink text-white flex items-center justify-center font-serif font-bold text-3xl rounded-sm mx-auto mb-8">B.</div>
+                <h1 className="font-serif text-2xl font-bold text-ink mb-2">Welcome to Briefly.</h1>
+                <p className="text-stone-500 mb-10">Select your preferred language / 言語を選択してください</p>
+
+                <div className="space-y-4">
                     <button
-                        className="lang-toggle"
-                        onClick={() => handleLanguageSelect(language === 'ja' ? 'en' : 'ja')}
+                        onClick={() => onSelect('ja')}
+                        className="w-full py-5 border-2 border-stone-200 hover:border-ink hover:bg-stone-50 transition-all group flex items-center justify-between px-8"
                     >
-                        {language === 'ja' ? 'EN' : 'JA'}
+                        <span className="font-bold text-lg text-ink">日本語</span>
+                        <span className="text-stone-400 group-hover:text-accent font-serif italic">Japanese</span>
                     </button>
-                    {(user || !isSupabaseConfigured()) && (
-                        <button className="logout-btn" onClick={handleLogout}>
-                            {t('logout', language)}
-                        </button>
-                    )}
+
+                    <button
+                        onClick={() => onSelect('en')}
+                        className="w-full py-5 border-2 border-stone-200 hover:border-ink hover:bg-stone-50 transition-all group flex items-center justify-between px-8"
+                    >
+                        <span className="font-bold text-lg text-ink">English</span>
+                        <span className="text-stone-400 group-hover:text-accent font-serif italic">English</span>
+                    </button>
                 </div>
-            </header>
-
-            {/* タブナビゲーション */}
-            <nav className="tab-nav">
-                <button
-                    className={`tab-btn ${activeTab === 'register' ? 'active' : ''}`}
-                    onClick={() => {
-                        setActiveTab('register');
-                        setSelectedChannel(null);
-                    }}
-                >
-                    {t('registerChannel', language)}
-                </button>
-                <button
-                    className={`tab-btn ${activeTab === 'letterbox' ? 'active' : ''}`}
-                    onClick={() => {
-                        setActiveTab('letterbox');
-                        setSelectedChannel(null);
-                    }}
-                >
-                    {t('letterBox', language)}
-                </button>
-                <button
-                    className={`tab-btn ${activeTab === 'channels' ? 'active' : ''}`}
-                    onClick={() => {
-                        setActiveTab('channels');
-                        setSelectedChannel(null);
-                    }}
-                >
-                    {t('channels', language)}
-                </button>
-            </nav>
-
-            {/* メインコンテンツ */}
-            <main className="main-content">
-                {/* チャンネル登録タブ */}
-                {activeTab === 'register' && (
-                    <div>
-                        <h2 className="section-title">{t('registerChannel', language)}</h2>
-                        <form className="register-form" onSubmit={handleRegisterChannel}>
-                            <input
-                                type="text"
-                                className="register-input"
-                                placeholder={language === 'ja' ? 'チャンネル名' : 'Channel Name'}
-                                value={channelName}
-                                onChange={(e) => setChannelName(e.target.value)}
-                                required
-                            />
-                            <input
-                                type="url"
-                                className="register-input"
-                                placeholder={t('channelUrl', language)}
-                                value={channelUrl}
-                                onChange={(e) => setChannelUrl(e.target.value)}
-                            />
-                            <button type="submit" className="register-btn">
-                                {t('register', language)}
-                            </button>
-                        </form>
-                    </div>
-                )}
-
-                {/* レターボックスタブ */}
-                {activeTab === 'letterbox' && (
-                    <div>
-                        {/* 今日のレター */}
-                        <section className="letters-section">
-                            <h2 className="section-title">{t('todayLetters', language)}</h2>
-                            {todayLetters.length > 0 ? (
-                                <div className="letters-grid">
-                                    {todayLetters.map((letter) => (
-                                        <LetterCard
-                                            key={letter.id}
-                                            letter={letter}
-                                            lang={language}
-                                            onDeepDiveGenerated={handleDeepDiveGenerated}
-                                        />
-                                    ))}
-                                </div>
-                            ) : (
-                                <p className="empty-state">{t('noLettersToday', language)}</p>
-                            )}
-                        </section>
-
-                        {/* 過去のレター */}
-                        <section className="letters-section">
-                            <h2 className="section-title">{t('pastLetters', language)}</h2>
-                            {pastLetters.length > 0 ? (
-                                <div className="letters-grid">
-                                    {pastLetters.map((letter) => (
-                                        <LetterCard
-                                            key={letter.id}
-                                            letter={letter}
-                                            lang={language}
-                                            onDeepDiveGenerated={handleDeepDiveGenerated}
-                                        />
-                                    ))}
-                                </div>
-                            ) : (
-                                <p className="empty-state">{t('noLettersPast', language)}</p>
-                            )}
-                        </section>
-                    </div>
-                )}
-
-                {/* チャンネル一覧タブ */}
-                {activeTab === 'channels' && !selectedChannel && (
-                    <div>
-                        <h2 className="section-title">{t('channels', language)}</h2>
-                        {channels.length > 0 ? (
-                            <div className="channels-grid">
-                                {channels.map((channel) => (
-                                    <div key={channel.id} className="channel-card">
-                                        <div className="channel-header">
-                                            <img src={channel.avatar_url} alt={channel.name} className="channel-avatar" />
-                                            <div className="channel-info">
-                                                <h3>{channel.name}</h3>
-                                                {channel.description && <p>{channel.description}</p>}
-                                            </div>
-                                        </div>
-                                        <div className="channel-actions">
-                                            <button
-                                                className="channel-btn"
-                                                onClick={() => setSelectedChannel(channel)}
-                                            >
-                                                {t('viewLetters', language)}
-                                            </button>
-                                            <button
-                                                className="channel-btn delete"
-                                                onClick={() => handleDeleteChannel(channel.id)}
-                                            >
-                                                {t('delete', language)}
-                                            </button>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        ) : (
-                            <p className="empty-state">{t('noChannels', language)}</p>
-                        )}
-                    </div>
-                )}
-
-                {/* 選択したチャンネルのレター一覧 */}
-                {activeTab === 'channels' && selectedChannel && (
-                    <div className="channel-letters-view">
-                        <button className="back-btn" onClick={() => setSelectedChannel(null)}>
-                            ← {t('channels', language)}
-                        </button>
-                        <h2 className="section-title">{selectedChannel.name}</h2>
-                        <p className="section-subtitle">{t('allLetters', language)}</p>
-                        {letters.filter((l) => l.channel_id === selectedChannel.id).length > 0 ? (
-                            <div className="letters-grid">
-                                {letters
-                                    .filter((l) => l.channel_id === selectedChannel.id)
-                                    .map((letter) => (
-                                        <LetterCard
-                                            key={letter.id}
-                                            letter={letter}
-                                            lang={language}
-                                            onDeepDiveGenerated={handleDeepDiveGenerated}
-                                        />
-                                    ))}
-                            </div>
-                        ) : (
-                            <p className="empty-state">{t('noLettersPast', language)}</p>
-                        )}
-                    </div>
-                )}
-            </main>
+            </div>
         </div>
     );
 };
 
-export default App;
+// 1. Sidebar Component
+const Sidebar = ({
+    channels, activeView, setActiveView, selectedChannelId, setSelectedChannelId, language, setLanguage, onSignOut
+}: {
+    channels: Channel[], activeView: ViewMode, setActiveView: (v: ViewMode) => void, selectedChannelId: string | null, setSelectedChannelId: (id: string | null) => void, language: Language, setLanguage: (l: Language) => void, onSignOut: () => void
+}) => {
+    const t = translations[language];
+    return (
+        <aside className="w-full md:w-72 bg-white border-r border-stone-200 h-auto md:h-screen flex flex-col flex-shrink-0 sticky top-0 z-20">
+            <div className="p-6 md:p-8 border-b border-stone-100 flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                    <div className="w-8 h-8 bg-ink text-white flex items-center justify-center font-serif font-bold text-xl rounded-sm">B.</div>
+                    <h1 className="font-serif text-xl font-bold tracking-tight text-ink">BRIEFLY.</h1>
+                </div>
+            </div>
+            <div className="flex-1 overflow-y-auto px-4 py-6 space-y-8">
+                <div>
+                    <h2 className="px-4 text-xs font-bold text-stone-400 uppercase tracking-widest mb-4">{t.menu}</h2>
+                    <nav className="space-y-1">
+                        <button onClick={() => { setActiveView('inbox'); setSelectedChannelId(null); }} className={clsx("w-full flex items-center space-x-3 px-4 py-2.5 rounded-md transition-all text-sm font-medium", activeView === 'inbox' ? "bg-paper text-accent" : "text-stone-600 hover:bg-stone-50")}>
+                            <Inbox size={18} /><span>{t.letterBox}</span>
+                        </button>
+                        <button onClick={() => { setActiveView('generator'); setSelectedChannelId(null); }} className={clsx("w-full flex items-center space-x-3 px-4 py-2.5 rounded-md transition-all text-sm font-medium", activeView === 'generator' ? "bg-paper text-accent" : "text-stone-600 hover:bg-stone-50")}>
+                            <Sparkles size={18} /><span>{t.generator}</span>
+                        </button>
+                        <button onClick={() => { setActiveView('register'); setSelectedChannelId(null); }} className={clsx("w-full flex items-center space-x-3 px-4 py-2.5 rounded-md transition-all text-sm font-medium", activeView === 'register' ? "bg-paper text-accent" : "text-stone-600 hover:bg-stone-50")}>
+                            <Plus size={18} /><span>{t.registerChannel}</span>
+                        </button>
+                    </nav>
+                </div>
+                <div>
+                    <div className="flex items-center justify-between px-4 mb-4">
+                        <h2 className="text-xs font-bold text-stone-400 uppercase tracking-widest">{t.subscriptions}</h2>
+                        <span className="text-xs text-stone-300 font-mono">{channels.length}</span>
+                    </div>
+                    <div className="space-y-1">
+                        {channels.map(channel => (
+                            <button key={channel.id} onClick={() => { setSelectedChannelId(channel.id); setActiveView('channel'); }} className={clsx("w-full flex items-center space-x-3 px-4 py-2 rounded-md transition-all group", selectedChannelId === channel.id ? "bg-paper" : "hover:bg-stone-50")}>
+                                {channel.avatarUrl ? <img src={channel.avatarUrl} alt={channel.name} className="w-6 h-6 rounded-full border border-stone-200" /> : <div className="w-6 h-6 rounded-full border border-stone-200 bg-stone-100"></div>}
+                                <span className={clsx("text-sm font-medium truncate", selectedChannelId === channel.id ? "text-ink" : "text-stone-500 group-hover:text-stone-700")}>{channel.name}</span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            </div>
+            <div className="p-6 border-t border-stone-100 space-y-4">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                    <button onClick={() => { setActiveView('settings'); setSelectedChannelId(null); }} className={clsx("flex items-center space-x-2 text-xs font-bold transition-colors", activeView === 'settings' ? "text-ink" : "text-stone-400 hover:text-ink")}>
+                        <Settings size={14} /><span>{t.settings}</span>
+                    </button>
+                    <button onClick={() => {
+                        const newLang = language === 'en' ? 'ja' : 'en';
+                        setLanguage(newLang);
+                        localStorage.setItem('briefly_language', newLang);
+                    }} className="flex items-center space-x-2 text-xs font-bold text-stone-500 hover:text-ink transition-colors">
+                        <Globe size={14} /><span>{language === 'en' ? 'ENGLISH' : '日本語'}</span>
+                    </button>
+                </div>
+                <button onClick={onSignOut} className="w-full flex items-center justify-center space-x-2 text-xs font-bold text-stone-400 hover:text-accent transition-colors py-2">
+                    <LogOut size={14} /><span>{t.signOut}</span>
+                </button>
+            </div>
+        </aside>
+    );
+}
+
+// 2. Channel Register Component
+const RegisterView = ({ onRegister, language }: { onRegister: (url: string) => void, language: Language }) => {
+    const [url, setUrl] = useState('');
+    const t = translations[language];
+    const handleSubmit = (e: React.FormEvent) => { e.preventDefault(); if (url) onRegister(url); };
+
+    return (
+        <div className="max-w-2xl mx-auto py-12 px-6 fade-in">
+            <div className="mb-10 text-center">
+                <h2 className="font-serif text-4xl text-ink font-bold mb-4">{t.curateFeed}</h2>
+                <p className="text-stone-500 text-lg">{t.curateSubtitle}</p>
+            </div>
+            <form onSubmit={handleSubmit} className="bg-white p-8 md:p-12 shadow-soft rounded-sm border border-stone-100">
+                <div className="relative">
+                    <label htmlFor="url" className="block text-xs font-bold text-stone-400 uppercase tracking-widest mb-3">{t.channelUrl}</label>
+                    <div className="flex gap-4">
+                        <div className="relative flex-1">
+                            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Search className="text-stone-300" size={20} /></div>
+                            <input type="text" id="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://www.youtube.com/@channelname" className="block w-full pl-10 pr-3 py-4 border border-stone-200 rounded-none bg-stone-50 text-ink placeholder-stone-300 focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent transition-all font-medium" />
+                        </div>
+                        <button type="submit" className="px-8 py-4 bg-ink text-white font-bold tracking-wide uppercase text-sm hover:bg-accent transition-colors duration-300">{t.subscribe}</button>
+                    </div>
+                    <p className="mt-4 text-xs text-stone-400 flex items-center"><Youtube size={12} className="mr-1" />{t.supports}</p>
+                </div>
+            </form>
+        </div>
+    );
+};
+
+// 2.5 Generator View
+const GeneratorView = ({ language }: { language: Language }) => {
+    const [url, setUrl] = useState('');
+    const [resultLetter, setResultLetter] = useState<Letter | null>(null);
+    const t = translations[language];
+
+    // In a real implementation this would call logic similar to handleRegister but only for one-off generation
+    // For MVP we can reuse the LetterCard if we construct a temporary letter object.
+    const handleGenerate = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!url) return;
+
+        // Mocking a result for immediate feedback UI structure, ideally calls geminiService here directly or creates a temporary Letter
+        const tempId = crypto.randomUUID();
+        const newLetter: Letter = {
+            id: tempId,
+            channelId: 'temp',
+            title: `Report for: ${url}`,
+            videoUrl: url,
+            thumbnailUrl: '',
+            summary: language === 'ja' ? 'レポートを生成するには「詳細レポート」をクリックしてください。' : 'Click "Read Report" to generate the content.',
+            date: new Date().toISOString(),
+            isDeepDiveAvailable: false,
+            isRead: false
+        };
+        setResultLetter(newLetter);
+    };
+
+    return (
+        <div className="max-w-2xl mx-auto py-12 px-6 fade-in">
+            <div className="mb-10 text-center">
+                <h2 className="font-serif text-4xl text-ink font-bold mb-4">{t.generator}</h2>
+                <div className="w-12 h-1 bg-accent mx-auto"></div>
+            </div>
+
+            <form onSubmit={handleGenerate} className="bg-white p-8 md:p-12 shadow-soft rounded-sm border border-stone-100 mb-12">
+                <div className="relative">
+                    <label htmlFor="gen-url" className="block text-xs font-bold text-stone-400 uppercase tracking-widest mb-3">{t.enterVideoUrl}</label>
+                    <div className="flex gap-4">
+                        <input type="text" id="gen-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://www.youtube.com/watch?v=..." className="block w-full px-4 py-4 border border-stone-200 rounded-none bg-stone-50 text-ink placeholder-stone-300 focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent transition-all font-medium" />
+                        <button type="submit" className="px-8 py-4 bg-ink text-white font-bold tracking-wide uppercase text-sm hover:bg-accent transition-colors duration-300">{t.generate}</button>
+                    </div>
+                </div>
+            </form>
+
+            {resultLetter && (
+                <div className="animate-in slide-in-from-bottom-4 duration-700">
+                    <LetterCard letter={resultLetter} language={language} onUpdateLetter={(l) => setResultLetter(l)} />
+                </div>
+            )}
+        </div>
+    )
+}
+
+// 2.6 Settings View
+const SettingsView = ({ language }: { language: Language }) => {
+    const [apiKey, setApiKey] = useState(getStoredCredential('GEMINI_API_KEY') || '');
+    const [saved, setSaved] = useState(false);
+    const t = translations[language];
+
+    const handleSave = (e: React.FormEvent) => {
+        e.preventDefault();
+        setStoredCredential('GEMINI_API_KEY', apiKey);
+        setSaved(true);
+        setTimeout(() => setSaved(false), 3000);
+    };
+
+    return (
+        <div className="max-w-lg mx-auto py-12 px-6 fade-in">
+            <div className="mb-10 text-center">
+                <h2 className="font-serif text-3xl text-ink font-bold mb-4">{t.settings}</h2>
+            </div>
+            <form onSubmit={handleSave} className="bg-white p-8 shadow-soft rounded-sm border border-stone-100">
+                <div className="mb-6">
+                    <label className="block text-xs font-bold text-stone-400 uppercase tracking-widest mb-2">{t.geminiApiKey}</label>
+                    <input
+                        type="password"
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        placeholder={t.apiKeyPlaceholder}
+                        className="w-full p-4 border border-stone-200 bg-stone-50 focus:outline-none focus:border-ink transition-colors font-mono text-sm"
+                    />
+                    <p className="mt-2 text-xs text-stone-400">{t.apiKeyHelp}</p>
+                </div>
+
+                {saved && (
+                    <div className="mb-4 text-green-600 text-sm flex items-center bg-green-50 p-3 rounded-sm">
+                        <CheckCircle2 size={16} className="mr-2" /> {t.settingsSaved}
+                    </div>
+                )}
+
+                <button type="submit" className="w-full py-4 bg-ink text-white font-bold tracking-widest uppercase text-sm hover:bg-stone-800 transition-colors">
+                    {t.saveSettings}
+                </button>
+            </form>
+        </div>
+    );
+};
+
+// 3. Login Component
+const AuthView = ({ language, setLanguage }: { language: Language, setLanguage: (l: Language) => void }) => {
+    const [view, setView] = useState<'signin' | 'signup'>('signin');
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [infoMessage, setInfoMessage] = useState<string | null>(null);
+    const t = translations[language];
+
+    const handleAuth = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!supabase) {
+            setError(t.supabaseWarning);
+            return;
+        }
+
+        setLoading(true);
+        setError(null);
+        setInfoMessage(null);
+
+        try {
+            if (view === 'signup') {
+                const { error, data } = await supabase.auth.signUp({
+                    email,
+                    password,
+                });
+                if (error) throw error;
+                if (data.user && !data.session) {
+                    setInfoMessage(t.checkEmail);
+                }
+            } else {
+                const { error } = await supabase.auth.signInWithPassword({ email, password });
+                if (error) throw error;
+            }
+        } catch (err: any) {
+            setError(err.message || t.authError);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const toggleLanguage = () => {
+        const newLang = language === 'en' ? 'ja' : 'en';
+        setLanguage(newLang);
+        localStorage.setItem('briefly_language', newLang);
+    };
+
+    return (
+        <div className="min-h-screen bg-paper flex flex-col md:flex-row animate-in fade-in duration-700">
+            {/* Left Column: Brand & Info (Visible on Desktop) */}
+            <div className="hidden md:flex flex-1 bg-ink text-white p-12 md:p-20 flex-col justify-between relative overflow-hidden">
+                <div className="relative z-10">
+                    <div className="w-16 h-16 bg-white text-ink flex items-center justify-center font-serif font-bold text-3xl rounded-sm mb-8">B.</div>
+                    <h1 className="font-serif text-5xl font-bold mb-6">Briefly.</h1>
+                    <p className="text-stone-300 text-xl leading-relaxed max-w-md font-light">
+                        {t.welcomeDescription}
+                    </p>
+                </div>
+
+                {/* Decorative circle */}
+                <div className="absolute -bottom-40 -right-40 w-96 h-96 rounded-full border-[30px] border-stone-800 opacity-50"></div>
+
+                <div className="relative z-10 text-stone-400 text-sm">
+                    © 2024 Briefly. AI Reader.
+                </div>
+            </div>
+
+            {/* Right Column: Auth Forms */}
+            <div className="flex-1 flex items-center justify-center p-6 md:p-20 bg-white relative">
+                <button
+                    onClick={toggleLanguage}
+                    className="absolute top-8 right-8 flex items-center space-x-2 text-sm font-bold text-stone-400 hover:text-ink transition-colors"
+                >
+                    <Globe size={16} />
+                    <span>{language === 'en' ? '日本語' : 'English'}</span>
+                </button>
+
+                <div className="w-full max-w-md">
+                    {/* Mobile Logo (Visible only on mobile) */}
+                    <div className="md:hidden text-center mb-10">
+                        <div className="w-12 h-12 bg-ink text-white flex items-center justify-center font-serif font-bold text-2xl rounded-sm mx-auto mb-4">B.</div>
+                        <h1 className="font-serif text-3xl font-bold text-ink">Briefly.</h1>
+                    </div>
+
+                    <div className="mb-8">
+                        {view === 'signup' && (
+                            <button onClick={() => setView('signin')} className="flex items-center text-stone-400 hover:text-ink mb-4 text-sm font-bold transition-colors">
+                                <ArrowLeft size={16} className="mr-1" /> {t.goBack}
+                            </button>
+                        )}
+                        <h2 className="font-serif text-3xl font-bold text-ink mb-2">
+                            {view === 'signin' ? t.signInTitle : t.accountSetup}
+                        </h2>
+                        <p className="text-stone-500">
+                            {view === 'signin' ? t.signInSubtitle : t.welcomeDescription}
+                        </p>
+                    </div>
+
+                    <form onSubmit={handleAuth} className="space-y-5">
+                        <div>
+                            <label className="block text-xs font-bold text-stone-400 uppercase tracking-widest mb-2">{t.emailLabel}</label>
+                            <input
+                                type="email"
+                                required
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="w-full p-4 border border-stone-200 bg-stone-50 focus:outline-none focus:border-ink transition-colors font-medium"
+                            />
+                        </div>
+                        <div className="relative">
+                            <label className="block text-xs font-bold text-stone-400 uppercase tracking-widest mb-2">{t.passwordLabel}</label>
+                            <input
+                                type={showPassword ? "text" : "password"}
+                                required
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="w-full p-4 border border-stone-200 bg-stone-50 focus:outline-none focus:border-ink transition-colors font-medium"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute right-4 top-[38px] text-stone-400 hover:text-ink transition-colors"
+                            >
+                                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                            </button>
+                        </div>
+
+                        {error && (
+                            <div className="flex items-start gap-2 text-red-600 bg-red-50 p-3 text-sm border border-red-100">
+                                <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
+                                <p>{error}</p>
+                            </div>
+                        )}
+
+                        {infoMessage && (
+                            <div className="flex items-start gap-2 text-green-700 bg-green-50 p-3 text-sm border border-green-100">
+                                <CheckCircle2 size={16} className="mt-0.5 flex-shrink-0" />
+                                <p>{infoMessage}</p>
+                            </div>
+                        )}
+
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            className="w-full py-4 bg-ink text-white font-bold tracking-widest uppercase text-sm hover:bg-stone-800 transition-colors disabled:opacity-50 mt-4 shadow-lg shadow-stone-200"
+                        >
+                            {loading ? t.loading : (view === 'signin' ? t.signInButton : t.signUpButton)}
+                        </button>
+                    </form>
+
+                    {view === 'signin' && (
+                        <div className="mt-8 text-center pt-6 border-t border-stone-100">
+                            <button
+                                onClick={() => setView('signup')}
+                                className="text-stone-500 hover:text-accent font-medium text-sm transition-colors"
+                            >
+                                {t.signUpButton}
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+// 4. Main App Container
+export default function App() {
+    const [session, setSession] = useState<Session | null>(null);
+    const [activeView, setActiveView] = useState<ViewMode>('inbox');
+    const [language, setLanguage] = useState<Language | null>(null);
+
+    // Data State
+    const [channels, setChannels] = useState<Channel[]>([]);
+    const [letters, setLetters] = useState<Letter[]>([]);
+    const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    // Initialize Language from LocalStorage
+    useEffect(() => {
+        const savedLang = localStorage.getItem('briefly_language') as Language;
+        if (savedLang) {
+            setLanguage(savedLang);
+        }
+    }, []);
+
+    // Initialize Auth & Data
+    useEffect(() => {
+        if (!supabase) {
+            setIsLoading(false);
+            // If no Supabase, load mock data immediately for demo
+            if (language) {
+                setChannels(language === 'ja' ? MOCK_CHANNELS_JA : MOCK_CHANNELS_EN);
+                setLetters(language === 'ja' ? MOCK_LETTERS_JA : MOCK_LETTERS_EN);
+            }
+            return;
+        }
+
+        supabase.auth.getSession().then(({ data: { session } }) => {
+            setSession(session);
+            setIsLoading(false);
+        });
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            setSession(session);
+        });
+
+        return () => subscription.unsubscribe();
+    }, [language]);
+
+    // Data Fetching Effect (Only runs if authenticated and language is set)
+    useEffect(() => {
+        if (!session || !supabase || !language) return;
+
+        const fetchData = async () => {
+            if (!supabase) return;
+            const { data: channelsData } = await supabase.from('channels').select('*');
+            if (channelsData && channelsData.length > 0) {
+                setChannels(channelsData);
+            } else {
+                setChannels([]);
+            }
+
+            const { data: lettersData } = await supabase.from('letters').select('*');
+            if (lettersData && lettersData.length > 0) {
+                setLetters(lettersData);
+            } else {
+                setLetters([]);
+            }
+        };
+        fetchData();
+    }, [session, language]);
+
+    const handleUpdateLetter = async (updatedLetter: Letter) => {
+        setLetters(prev => prev.map(l => l.id === updatedLetter.id ? updatedLetter : l));
+        if (session && supabase) {
+            const { error } = await supabase.from('letters').update({
+                deep_dive_content: updatedLetter.deepDiveContent,
+                is_deep_dive_available: updatedLetter.isDeepDiveAvailable
+            }).eq('id', updatedLetter.id);
+            if (error) console.error('Error saving deep dive:', error);
+        }
+    };
+
+    const handleRegister = async (url: string) => {
+        const newId = crypto.randomUUID();
+
+        // Fetch channel info from YouTube API
+        let channelInfo: Partial<Channel> | null = null;
+        try {
+            channelInfo = await fetchChannelInfo(url);
+        } catch (e) {
+            console.error(e);
+        }
+
+        const newChannel: Channel = {
+            id: newId,
+            name: channelInfo?.name || `Channel from ${url.substring(0, 15)}...`,
+            avatarUrl: channelInfo?.avatarUrl || `https://picsum.photos/seed/${newId}/100/100`,
+            description: channelInfo?.description || 'Added via Briefly.'
+        };
+
+        setChannels(prev => [...prev, newChannel]);
+        setActiveView('inbox');
+        setSelectedChannelId(newId);
+
+        if (session && supabase) {
+            const { error } = await supabase.from('channels').insert({
+                id: newId,
+                user_id: session.user.id,
+                name: newChannel.name,
+                avatar_url: newChannel.avatarUrl,
+                description: newChannel.description
+            });
+            if (error) console.error("Error saving channel:", error);
+
+            const newLetterId = crypto.randomUUID();
+            const newLetter: Letter = {
+                id: newLetterId,
+                channelId: newId,
+                title: 'Subscription Confirmed',
+                videoUrl: url,
+                thumbnailUrl: 'https://picsum.photos/seed/welcome/600/340',
+                summary: language === 'ja' ? '新しいチャンネルを登録しました。次回の更新をお待ちください。' : 'Channel subscribed successfully. Updates will appear here.',
+                date: new Date().toISOString(),
+                isDeepDiveAvailable: false,
+                isRead: false
+            };
+            setLetters(prev => [newLetter, ...prev]);
+
+            await supabase.from('letters').insert({ ...newLetter, user_id: session.user.id });
+        }
+    };
+
+    const handleSignOut = () => {
+        if (supabase) supabase.auth.signOut();
+    };
+
+    // Helper to get letters based on view
+    const getFilteredLetters = () => {
+        let filtered = letters;
+        if (selectedChannelId) {
+            filtered = letters.filter(l => l.channelId === selectedChannelId);
+        }
+        return filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    };
+
+    // RENDER LOGIC FLOW
+
+    // 1. Language Not Selected -> Show Picker
+    if (!language) {
+        return <LanguageSelectionView onSelect={(l) => {
+            setLanguage(l);
+            localStorage.setItem('briefly_language', l);
+        }} />;
+    }
+
+    const t = translations[language];
+
+    // 2. Loading State
+    if (isLoading) {
+        return <div className="h-screen w-full flex items-center justify-center bg-paper text-ink font-serif">{t.loading}</div>;
+    }
+
+    // 3. Not Authenticated (and Supabase is configured) -> Show Auth
+    if (!session && supabase) {
+        return <AuthView language={language} setLanguage={setLanguage} />;
+    }
+
+    // 4. Main App (Authenticated OR Demo Mode if Supabase missing)
+    const filteredLetters = getFilteredLetters();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todaysLetters = filteredLetters.filter(l => new Date(l.date) >= today);
+    const pastLetters = filteredLetters.filter(l => new Date(l.date) < today);
+
+    const renderContent = () => {
+        if (activeView === 'register') return <RegisterView onRegister={handleRegister} language={language} />;
+        if (activeView === 'generator') return <GeneratorView language={language} />;
+        if (activeView === 'settings') return <SettingsView language={language} />;
+
+        const isChannelView = activeView === 'channel' && selectedChannelId;
+        const currentChannel = isChannelView ? channels.find(c => c.id === selectedChannelId) : null;
+
+        return (
+            <div className="max-w-4xl mx-auto py-8 px-4 md:px-8">
+                <div className="mb-12 border-b-2 border-ink pb-6 flex items-end justify-between">
+                    <div>
+                        <span className="block text-xs font-bold text-accent uppercase tracking-widest mb-2">
+                            {isChannelView ? t.channelArchive : t.dailyDigest}
+                        </span>
+                        <h2 className="font-serif text-4xl md:text-5xl font-bold text-ink">
+                            {isChannelView ? currentChannel?.name : t.letterBox}
+                        </h2>
+                    </div>
+                    <div className="text-stone-400 text-sm font-medium">
+                        {language === 'ja'
+                            ? new Date().toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).replace(/ /g, '')
+                            : new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+                        }
+                    </div>
+                </div>
+
+                {todaysLetters.length > 0 && (
+                    <div className="mb-16">
+                        <div className="flex items-center space-x-4 mb-8">
+                            <h3 className="font-display text-xl font-bold text-stone-800">{t.todaysEdition}</h3>
+                            <div className="h-px bg-stone-300 flex-1"></div>
+                        </div>
+                        <div className="space-y-8">
+                            {todaysLetters.map(letter => (
+                                <LetterCard key={letter.id} letter={letter} channel={channels.find(c => c.id === letter.channelId)} onUpdateLetter={handleUpdateLetter} language={language} />
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {(pastLetters.length > 0 || (todaysLetters.length === 0 && pastLetters.length === 0)) && (
+                    <div>
+                        <div className="flex items-center space-x-4 mb-8">
+                            <h3 className="font-display text-xl font-bold text-stone-400">{t.previousEditions}</h3>
+                            <div className="h-px bg-stone-200 flex-1"></div>
+                        </div>
+                        {pastLetters.length === 0 && todaysLetters.length === 0 ? (
+                            <div className="text-center py-20 bg-white border border-dashed border-stone-300">
+                                <Bell className="mx-auto text-stone-300 mb-4" size={48} />
+                                <p className="text-stone-500 font-medium">{t.noLetters}</p>
+                            </div>
+                        ) : (
+                            <div className="space-y-8">
+                                {pastLetters.map(letter => (
+                                    <LetterCard key={letter.id} letter={letter} channel={channels.find(c => c.id === letter.channelId)} onUpdateLetter={handleUpdateLetter} language={language} />
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    return (
+        <div className="flex flex-col md:flex-row min-h-screen bg-paper font-sans">
+            <Sidebar channels={channels} activeView={activeView} setActiveView={setActiveView} selectedChannelId={selectedChannelId} setSelectedChannelId={setSelectedChannelId} language={language} setLanguage={setLanguage} onSignOut={handleSignOut} />
+            <main className="flex-1 overflow-y-auto h-screen relative scroll-smooth">
+                {!getCredential('GEMINI_API_KEY') && <div className="bg-accent text-white px-4 py-2 text-center text-sm font-medium sticky top-0 z-50">{t.apiKeyWarning}</div>}
+                {!supabase && <div className="bg-stone-800 text-white px-4 py-2 text-center text-sm font-medium sticky top-0 z-40">{t.supabaseWarning}</div>}
+                {renderContent()}
+            </main>
+        </div>
+    );
+}

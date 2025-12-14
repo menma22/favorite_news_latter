@@ -1,159 +1,148 @@
-// LetterCard コンポーネント
 import React, { useState } from 'react';
-import type { Letter, Language } from '../types';
-import { t } from '../lib/i18n';
+import { Letter, Channel } from '../types';
 import { generateDeepDive } from '../services/geminiService';
-import { supabase } from '../lib/supabase';
+import { FileText, Loader2, PlayCircle, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import { Language, translations } from '../lib/i18n';
 
 interface LetterCardProps {
     letter: Letter;
-    lang: Language;
-    onDeepDiveGenerated: (letterId: string, content: string) => void;
+    channel?: Channel;
+    language: Language;
+    onUpdateLetter: (updatedLetter: Letter) => void;
 }
 
-const LetterCard: React.FC<LetterCardProps> = ({ letter, lang, onDeepDiveGenerated }) => {
-    const [isGenerating, setIsGenerating] = useState(false);
-    const [showModal, setShowModal] = useState(false);
-    const [deepDiveContent, setDeepDiveContent] = useState(letter.deep_dive_content || '');
+const LetterCard: React.FC<LetterCardProps> = ({ letter, channel, language, onUpdateLetter }) => {
+    const [isLoading, setIsLoading] = useState(false);
+    const [isExpanded, setIsExpanded] = useState(false);
     const [error, setError] = useState<string | null>(null);
-
-    const formatDate = (dateString: string): string => {
-        const date = new Date(dateString);
-        return lang === 'ja'
-            ? date.toLocaleDateString('ja-JP', { year: 'numeric', month: 'long', day: 'numeric' })
-            : date.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
-    };
+    const t = translations[language];
 
     const handleDeepDive = async () => {
-        if (letter.is_deep_dive_available && deepDiveContent) {
-            setShowModal(true);
+        if (letter.deepDiveContent) {
+            setIsExpanded(!isExpanded);
             return;
         }
 
-        setIsGenerating(true);
+        setIsLoading(true);
         setError(null);
 
-        const result = await generateDeepDive(letter.video_url, letter.title, lang);
-
-        if (result.success) {
-            setDeepDiveContent(result.content);
-            setShowModal(true);
-            onDeepDiveGenerated(letter.id, result.content);
-
-            // Supabaseに保存
-            if (supabase) {
-                await supabase
-                    .from('letters')
-                    .update({
-                        deep_dive_content: result.content,
-                        is_deep_dive_available: true,
-                    })
-                    .eq('id', letter.id);
-            }
-        } else {
-            setError(result.error || 'Unknown error');
+        try {
+            const content = await generateDeepDive(letter.videoUrl, language);
+            onUpdateLetter({
+                ...letter,
+                deepDiveContent: content,
+                isDeepDiveAvailable: true,
+            });
+            setIsExpanded(true);
+        } catch (err) {
+            setError(language === 'ja' ? "レポートの生成に失敗しました。" : "Failed to generate detailed report. Please try again.");
+        } finally {
+            setIsLoading(false);
         }
-
-        setIsGenerating(false);
     };
 
-    const renderMarkdown = (content: string): React.ReactNode => {
-        // 最低限のMarkdown変換
-        const lines = content.split('\n');
-        return lines.map((line, index) => {
-            // 見出し
-            if (line.startsWith('# ')) {
-                return <h1 key={index}>{line.substring(2)}</h1>;
-            }
-            if (line.startsWith('## ')) {
-                return <h2 key={index}>{line.substring(3)}</h2>;
-            }
-            if (line.startsWith('### ')) {
-                return <h3 key={index}>{line.substring(4)}</h3>;
-            }
-            // 水平線
-            if (line.trim() === '---') {
-                return <hr key={index} />;
-            }
-            // リスト
-            if (line.startsWith('- ')) {
-                return <li key={index}>{line.substring(2)}</li>;
-            }
-            // 太字
-            if (line.includes('**')) {
-                const parts = line.split(/\*\*(.*?)\*\*/g);
-                return (
-                    <p key={index}>
-                        {parts.map((part, i) => (i % 2 === 1 ? <strong key={i}>{part}</strong> : part))}
-                    </p>
-                );
-            }
-            // 通常のテキスト
-            if (line.trim()) {
-                return <p key={index}>{line}</p>;
-            }
-            return null;
-        });
-    };
+    const formattedDate = new Date(letter.date).toLocaleDateString(language === 'ja' ? 'ja-JP' : 'en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
 
     return (
-        <>
-            <article className="letter-card">
-                <img
-                    src={letter.thumbnail_url || `https://picsum.photos/seed/${letter.id}/640/360`}
-                    alt={letter.title}
-                    className="letter-thumbnail"
-                />
-                <div className="letter-content">
-                    <div className="letter-channel">
-                        <img
-                            src={letter.channel_avatar || `https://picsum.photos/seed/${letter.channel_id}/48/48`}
-                            alt={letter.channel_name || 'Channel'}
-                            className="letter-channel-avatar"
-                        />
-                        <span className="letter-channel-name">{letter.channel_name || 'Channel'}</span>
+        <div className="bg-surface rounded-none border border-stone-200 shadow-soft overflow-hidden transition-all duration-300 hover:shadow-md mb-8 group">
+            {/* Header Section */}
+            <div className="p-6 md:p-8 relative">
+
+
+                <div className="flex justify-between items-start mb-4">
+                    <div className="flex items-center space-x-3">
+                        {channel && (
+                            <img src={channel.avatarUrl} alt={channel.name} className="w-8 h-8 rounded-full border border-stone-100 object-cover" />
+                        )}
+                        <div className="flex flex-col">
+                            <span className="text-xs font-bold tracking-wider text-stone-500 uppercase">{channel?.name || 'Unknown Channel'}</span>
+                            <span className="text-xs text-stone-400 font-medium">{formattedDate}</span>
+                        </div>
                     </div>
-                    <h3 className="letter-title">
-                        <a href={letter.video_url} target="_blank" rel="noopener noreferrer">
-                            {letter.title}
-                        </a>
-                    </h3>
-                    <p className="letter-summary">{letter.summary}</p>
-                    <p className="letter-date">{formatDate(letter.created_at)}</p>
-                    {error && <p className="login-error">{error}</p>}
-                    <div className="letter-actions">
+                    <a href={letter.videoUrl} target="_blank" rel="noreferrer" className="text-stone-400 hover:text-accent transition-colors">
+                        <ExternalLink size={18} />
+                    </a>
+                </div>
+
+                <h3 className="font-serif text-2xl md:text-3xl text-ink font-bold leading-tight mb-4">
+                    {letter.title}
+                </h3>
+
+                <div className="flex flex-col md:flex-row gap-6">
+                    <div className="w-full md:w-1/3 flex-shrink-0">
+                        <div className="relative aspect-video bg-stone-100 rounded-sm overflow-hidden group/image cursor-pointer">
+                            {letter.thumbnailUrl ? (
+                                <img src={letter.thumbnailUrl} alt={letter.title} className="w-full h-full object-cover transition-transform duration-700 group-hover/image:scale-105" />
+                            ) : (
+                                <div className="w-full h-full flex items-center justify-center bg-stone-200 text-stone-400">
+                                    <PlayCircle size={48} />
+                                </div>
+                            )}
+                            <a href={letter.videoUrl} target="_blank" rel="noreferrer" className="absolute inset-0 flex items-center justify-center bg-black/10 group-hover/image:bg-black/20 transition-colors">
+                                <PlayCircle className="text-white opacity-90 group-hover/image:scale-110 transition-all duration-300" strokeWidth={1.5} size={56} />
+                            </a>
+                        </div>
+                    </div>
+
+                    <div className="w-full md:w-2/3 flex flex-col justify-between">
+                        <p className="text-stone-600 leading-relaxed font-sans text-sm md:text-base mb-4">
+                            {letter.summary}
+                        </p>
+
+                        <div className="flex items-center justify-between mt-4">
+                            <button
+                                onClick={handleDeepDive}
+                                disabled={isLoading}
+                                className="flex items-center space-x-2 text-ink hover:text-accent transition-colors disabled:opacity-50 group/btn"
+                            >
+                                {isLoading ? (
+                                    <Loader2 className="animate-spin" size={18} />
+                                ) : (
+                                    <FileText size={18} />
+                                )}
+                                <span className="font-semibold text-sm tracking-wide">
+                                    {letter.deepDiveContent ? (isExpanded ? t.closeReport : t.readReport) : t.generateDeepDive}
+                                </span>
+                                {letter.deepDiveContent && (
+                                    isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {error && (
+                    <div className="mt-4 p-3 bg-red-50 text-red-600 text-sm rounded border border-red-100">
+                        {error}
+                    </div>
+                )}
+            </div>
+
+            {/* Expanded Deep Dive Content */}
+            {isExpanded && letter.deepDiveContent && (
+                <div className="border-t border-stone-200 bg-[#FAFAFA] px-6 py-8 md:px-12 md:py-10 animate-in slide-in-from-top-4 duration-500">
+                    <div className="prose prose-stone max-w-none markdown-content">
+                        <ReactMarkdown>
+                            {letter.deepDiveContent}
+                        </ReactMarkdown>
+                    </div>
+                    <div className="mt-8 pt-6 border-t border-stone-200 flex justify-center">
                         <button
-                            className={`deep-dive-btn ${isGenerating ? 'generating' : ''}`}
-                            onClick={handleDeepDive}
-                            disabled={isGenerating}
+                            onClick={() => setIsExpanded(false)}
+                            className="text-stone-400 hover:text-ink text-sm font-medium tracking-widest uppercase transition-colors"
                         >
-                            {isGenerating
-                                ? t('generating', lang)
-                                : letter.is_deep_dive_available && deepDiveContent
-                                    ? t('readMore', lang)
-                                    : t('generateDeepDive', lang)}
+                            {t.closeReport}
                         </button>
                     </div>
                 </div>
-            </article>
-
-            {/* Deep Dive Modal */}
-            {showModal && (
-                <div className="modal-overlay" onClick={() => setShowModal(false)}>
-                    <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-                        <div className="modal-header">
-                            <h2 className="modal-title">{letter.title}</h2>
-                            <button className="modal-close" onClick={() => setShowModal(false)}>
-                                ×
-                            </button>
-                        </div>
-                        <div className="modal-body">
-                            <div className="deep-dive-content">{renderMarkdown(deepDiveContent)}</div>
-                        </div>
-                    </div>
-                </div>
             )}
-        </>
+        </div>
     );
 };
 

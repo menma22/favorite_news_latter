@@ -1,156 +1,88 @@
 // Gemini APIサービス
-import { GEMINI_API_KEY, isGeminiConfigured } from '../lib/credentials';
+import { getCredential } from '../lib/credentials';
 import type { Language } from '../types';
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
-
-export interface DeepDiveResult {
-    success: boolean;
-    content: string;
-    error?: string;
-}
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-pro:generateContent';
 
 export const generateDeepDive = async (
     videoUrl: string,
-    videoTitle: string,
     lang: Language
-): Promise<DeepDiveResult> => {
-    if (!isGeminiConfigured()) {
-        return {
-            success: false,
-            content: '',
-            error: lang === 'ja'
-                ? 'Gemini APIが設定されていません。.envファイルを確認してください。'
-                : 'Gemini API is not configured. Please check your .env file.',
-        };
+): Promise<string> => {
+    const apiKey = getCredential('GEMINI_API_KEY');
+
+    if (!apiKey) {
+        throw new Error(lang === 'ja'
+            ? 'Gemini APIが設定されていません。.envファイルを確認してください。'
+            : 'Gemini API is not configured. Please check your .env file.');
     }
 
     const prompt = lang === 'ja'
         ? `
-以下のYouTube動画について、詳細なレポートを作成してください。
+以下のYouTube動画について、詳細な記事を作成してください。
+URL: ${videoUrl}
 
-動画URL: ${videoUrl}
-動画タイトル: ${videoTitle}
+与えられたURLの動画を文字起こしし、全文の内容を漏らさず含んだうえで、目次付きで、見やすい記事にして
+タイムスタンプもつけて
 
-以下の形式で出力してください：
+##出力の構造##
 
-# 📋 目次
+# 記事の目次
 
-（各セクションへのリンク）
+# 要約
+動画の内容を要約して、動画の重要な所を瞬時に理解できるセクション
 
----
-
-# 🎯 要約
-
-動画の重要なポイントを簡潔にまとめてください。箇条書きで3-5点程度。
-
----
-
-# 📖 詳細レポート
-
-## セクション1: [タイトル]
-**⏱️ タイムスタンプ: 0:00 - X:XX**
-
-詳細な内容...
-
-## セクション2: [タイトル]
-**⏱️ タイムスタンプ: X:XX - Y:YY**
-
-詳細な内容...
-
-（セクションは動画の内容に応じて適切な数で区切ってください）
-
----
-
-# 💡 まとめ
-
-動画全体の結論や学びをまとめてください。
+# 動画の全内容を含む記事部分
+（全文の内容を漏らさず、タイムスタンプ付きで詳細に記述）
 `
         : `
-Please create a detailed report about the following YouTube video.
+Please create a detailed article based on the following YouTube video.
+URL: ${videoUrl}
 
-Video URL: ${videoUrl}
-Video Title: ${videoTitle}
+Transcribe the video from the given URL, include the full content without omissions, and create a readable article with a table of contents and timestamps.
 
-Please output in the following format:
+## Output Structure ##
 
-# 📋 Table of Contents
-
-(Links to each section)
-
----
+# Table of Contents using Article Links
 
 # 🎯 Summary
+A section summarizing the video content for instant understanding of the key points.
 
-Summarize the key points of the video concisely. About 3-5 bullet points.
-
----
-
-# 📖 Detailed Report
-
-## Section 1: [Title]
-**⏱️ Timestamp: 0:00 - X:XX**
-
-Detailed content...
-
-## Section 2: [Title]
-**⏱️ Timestamp: X:XX - Y:YY**
-
-Detailed content...
-
-(Divide sections appropriately based on the video content)
-
----
-
-# 💡 Conclusion
-
-Summarize the overall conclusion and learnings from the video.
+# 📖 Full Article Section containing Video Content
+(Describe in detail with timestamps, ensuring no content is omitted)
 `;
 
-    try {
-        const response = await fetch(`${GEMINI_API_URL}?key=${GEMINI_API_KEY}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                contents: [
-                    {
-                        parts: [
-                            {
-                                text: prompt,
-                            },
-                        ],
-                    },
-                ],
-                generationConfig: {
-                    temperature: 0.7,
-                    maxOutputTokens: 4096,
+    const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            contents: [
+                {
+                    parts: [
+                        {
+                            text: prompt,
+                        },
+                    ],
                 },
-            }),
-        });
+            ],
+            generationConfig: {
+                temperature: 0.7,
+                maxOutputTokens: 4096,
+            },
+        }),
+    });
 
-        if (!response.ok) {
-            throw new Error(`API error: ${response.status}`);
-        }
-
-        const data = await response.json();
-        const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-        if (!generatedText) {
-            throw new Error('Empty response from API');
-        }
-
-        return {
-            success: true,
-            content: generatedText,
-        };
-    } catch (error) {
-        console.error('Gemini API error:', error);
-        return {
-            success: false,
-            content: '',
-            error: error instanceof Error ? error.message : 'Unknown error occurred',
-        };
+    if (!response.ok) {
+        throw new Error(`API error: ${response.status}`);
     }
+
+    const data = await response.json();
+    const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    if (!generatedText) {
+        throw new Error('Empty response from API');
+    }
+
+    return generatedText;
 };

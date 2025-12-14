@@ -1,135 +1,154 @@
 // 国際化（i18n）モジュール
-import type { Language } from '../types';
 
-type TranslationKey =
-    | 'appName'
-    | 'tagline'
-    | 'login'
-    | 'signUp'
-    | 'logout'
-    | 'email'
-    | 'password'
-    | 'noAccount'
-    | 'hasAccount'
-    | 'registerChannel'
-    | 'letterBox'
-    | 'channels'
-    | 'todayLetters'
-    | 'pastLetters'
-    | 'noLettersToday'
-    | 'noLettersPast'
-    | 'generateDeepDive'
-    | 'generating'
-    | 'readMore'
-    | 'channelUrl'
-    | 'register'
-    | 'cancel'
-    | 'delete'
-    | 'viewLetters'
-    | 'noChannels'
-    | 'welcomeTitle'
-    | 'welcomeSummary'
-    | 'selectLanguage'
-    | 'japanese'
-    | 'english'
-    | 'configError'
-    | 'configErrorDesc'
-    | 'loginError'
-    | 'signUpSuccess'
-    | 'allLetters'
-    | 'loading';
+export type Language = 'ja' | 'en';
 
-const translations: Record<Language, Record<TranslationKey, string>> = {
+interface TranslationStrings {
+    menu: string;
+    registerChannel: string;
+    letterBox: string;
+    subscriptions: string;
+    signOut: string;
+    curateFeed: string;
+    curateSubtitle: string;
+    channelUrl: string;
+    subscribe: string;
+    supports: string;
+    signInTitle: string;
+    signInSubtitle: string;
+    emailLabel: string;
+    passwordLabel: string;
+    loading: string;
+    signInButton: string;
+    signUpButton: string;
+    dailyDigest: string;
+    channelArchive: string;
+    todaysEdition: string;
+    previousEditions: string;
+    noLetters: string;
+    generateDeepDive: string;
+    readReport: string;
+    closeReport: string;
+    apiKeyWarning: string;
+    supabaseWarning: string;
+    authError: string;
+    checkEmail: string;
+    goBack: string;
+    accountSetup: string;
+    showPassword: string;
+    hidePassword: string;
+    welcomeDescription: string;
+    languageSelect: string;
+    fetchingChannel: string;
+    channelFound: string;
+    channelNotFound: string;
+    settings: string;
+    geminiApiKey: string;
+    saveSettings: string;
+    generator: string;
+    enterVideoUrl: string;
+    generate: string;
+    settingsSaved: string;
+    apiKeyPlaceholder: string;
+    apiKeyHelp: string;
+}
+
+export const translations: Record<Language, TranslationStrings> = {
     ja: {
-        appName: 'Briefly.',
-        tagline: 'あなたの毎日のYouTubeダイジェスト',
-        login: 'ログイン',
-        signUp: '新規登録',
-        logout: 'ログアウト',
-        email: 'メールアドレス',
-        password: 'パスワード',
-        noAccount: 'アカウントをお持ちでない方',
-        hasAccount: 'すでにアカウントをお持ちの方',
+        menu: 'メニュー',
         registerChannel: 'チャンネル登録',
         letterBox: 'レターボックス',
-        channels: 'チャンネル一覧',
-        todayLetters: '今日のレター',
-        pastLetters: '過去のレター',
-        noLettersToday: '今日のレターはまだありません',
-        noLettersPast: '過去のレターはありません',
-        generateDeepDive: '詳細レポートを生成',
-        generating: '生成中...',
-        readMore: '続きを読む',
-        channelUrl: 'YouTubeチャンネルURL',
-        register: '登録',
-        cancel: 'キャンセル',
-        delete: '削除',
-        viewLetters: 'レター一覧',
-        noChannels: '登録されているチャンネルはありません',
-        welcomeTitle: 'ようこそ！チャンネルを登録しましょう',
-        welcomeSummary: 'このアプリでは、お気に入りのYouTubeチャンネルの最新動画を毎日ダイジェスト形式でお届けします。',
-        selectLanguage: '言語を選択してください',
-        japanese: '日本語',
-        english: 'English',
-        configError: '設定エラー',
-        configErrorDesc: 'Supabaseの設定が完了していません。.envファイルを確認してください。',
-        loginError: 'ログインに失敗しました',
-        signUpSuccess: '確認メールを送信しました。メールを確認してください。',
-        allLetters: 'すべてのレター',
+        subscriptions: '登録チャンネル',
+        signOut: 'ログアウト',
+        curateFeed: 'フィードを編集',
+        curateSubtitle: 'お気に入りのYouTubeチャンネルを登録して、AIによる要約を受け取りましょう。',
+        channelUrl: 'チャンネルURL',
+        subscribe: '登録する',
+        supports: 'チャンネルURLと動画リンクに対応',
+        signInTitle: 'Briefly.へようこそ',
+        signInSubtitle: 'サインインして始めましょう',
+        emailLabel: 'メールアドレス',
+        passwordLabel: 'パスワード',
         loading: '読み込み中...',
+        signInButton: 'サインイン',
+        signUpButton: 'アカウント作成',
+        dailyDigest: '今日の要約',
+        channelArchive: 'チャンネルアーカイブ',
+        todaysEdition: '本日のレター',
+        previousEditions: '過去のレター',
+        noLetters: 'まだレターがありません',
+        generateDeepDive: '詳細レポートを生成',
+        readReport: 'レポートを読む',
+        closeReport: 'レポートを閉じる',
+        apiKeyWarning: '注意: Gemini APIキーが設定されていません。lib/credentials.tsを確認してください。',
+        supabaseWarning: '注意: Supabaseと連携されていません。lib/credentials.tsを確認してください。',
+        authError: '認証エラーが発生しました',
+        checkEmail: '確認メールを送信しました。メールをご確認ください。',
+        goBack: '戻る',
+        accountSetup: 'アカウント設定',
+        showPassword: '表示',
+        hidePassword: '非表示',
+        welcomeDescription: 'Brieflyは、忙しいあなたのためのAIニュースリーダーです。お気に入りのYouTubeチャンネルから、重要な情報を短時間で効率的に収集しましょう。',
+        languageSelect: '言語 / Language',
+        fetchingChannel: 'チャンネル情報を取得中...',
+        channelFound: 'チャンネルが見つかりました！',
+        channelNotFound: 'チャンネルが見つかりませんでした。',
+        settings: '設定',
+        geminiApiKey: 'Gemini APIキー',
+        saveSettings: '設定を保存',
+        generator: 'レター生成',
+        enterVideoUrl: '動画のURLを入力',
+        generate: '生成する',
+        settingsSaved: '設定を保存しました。',
+        apiKeyPlaceholder: 'AIza...',
+        apiKeyHelp: 'Google AI Studioで取得したキーを入力してください。',
     },
     en: {
-        appName: 'Briefly.',
-        tagline: 'Your Daily YouTube Digest',
-        login: 'Login',
-        signUp: 'Sign Up',
-        logout: 'Logout',
-        email: 'Email',
-        password: 'Password',
-        noAccount: "Don't have an account?",
-        hasAccount: 'Already have an account?',
+        menu: 'Menu',
         registerChannel: 'Register Channel',
         letterBox: 'Letter Box',
-        channels: 'Channels',
-        todayLetters: "Today's Letters",
-        pastLetters: 'Past Letters',
-        noLettersToday: 'No letters today yet',
-        noLettersPast: 'No past letters',
-        generateDeepDive: 'Generate Deep Dive',
-        generating: 'Generating...',
-        readMore: 'Read More',
-        channelUrl: 'YouTube Channel URL',
-        register: 'Register',
-        cancel: 'Cancel',
-        delete: 'Delete',
-        viewLetters: 'View Letters',
-        noChannels: 'No channels registered',
-        welcomeTitle: 'Welcome! Register a channel',
-        welcomeSummary: 'This app delivers daily digests of your favorite YouTube channels.',
-        selectLanguage: 'Select your language',
-        japanese: '日本語',
-        english: 'English',
-        configError: 'Configuration Error',
-        configErrorDesc: 'Supabase is not configured. Please check your .env file.',
-        loginError: 'Login failed',
-        signUpSuccess: 'Confirmation email sent. Please check your inbox.',
-        allLetters: 'All Letters',
+        subscriptions: 'Subscriptions',
+        signOut: 'Sign Out',
+        curateFeed: 'Curate Your Feed',
+        curateSubtitle: 'Register your favorite YouTube channels and receive AI-powered summaries.',
+        channelUrl: 'Channel URL',
+        subscribe: 'Subscribe',
+        supports: 'Supports channel URLs and video links',
+        signInTitle: 'Welcome to Briefly.',
+        signInSubtitle: 'Sign in to get started',
+        emailLabel: 'Email',
+        passwordLabel: 'Password',
         loading: 'Loading...',
+        signInButton: 'Sign In',
+        signUpButton: 'Create Account',
+        dailyDigest: 'Daily Digest',
+        channelArchive: 'Channel Archive',
+        todaysEdition: "Today's Edition",
+        previousEditions: 'Previous Editions',
+        noLetters: 'No letters yet',
+        generateDeepDive: 'Generate Deep Dive',
+        readReport: 'Read Report',
+        closeReport: 'Close Report',
+        apiKeyWarning: 'Warning: Gemini API key not set. Please check lib/credentials.ts.',
+        supabaseWarning: 'Warning: Not connected to Supabase. Please check lib/credentials.ts.',
+        authError: 'An authentication error occurred',
+        checkEmail: 'Confirmation email sent. Please check your inbox.',
+        goBack: 'Back',
+        accountSetup: 'Account Setup',
+        showPassword: 'Show',
+        hidePassword: 'Hide',
+        welcomeDescription: 'Briefly is your AI news reader for the busy mind. Efficiently gather key insights from your favorite YouTube channels in less time.',
+        languageSelect: 'Language / 言語',
+        fetchingChannel: 'Fetching channel info...',
+        channelFound: 'Channel found!',
+        channelNotFound: 'Channel not found.',
+        settings: 'Settings',
+        geminiApiKey: 'Gemini API Key',
+        saveSettings: 'Save Settings',
+        generator: 'Generator',
+        enterVideoUrl: 'Enter Video URL',
+        generate: 'Generate',
+        settingsSaved: 'Settings saved.',
+        apiKeyPlaceholder: 'AIza...',
+        apiKeyHelp: 'Enter your key from Google AI Studio.',
     },
-};
-
-export const t = (key: TranslationKey, lang: Language): string => {
-    return translations[lang][key] || key;
-};
-
-export const getStoredLanguage = (): Language | null => {
-    const stored = localStorage.getItem('briefly_language');
-    if (stored === 'ja' || stored === 'en') {
-        return stored;
-    }
-    return null;
-};
-
-export const setStoredLanguage = (lang: Language): void => {
-    localStorage.setItem('briefly_language', lang);
 };
