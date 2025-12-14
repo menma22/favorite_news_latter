@@ -1,21 +1,7 @@
 import { getCredential } from '../lib/credentials';
 import { Channel } from '../types';
 
-interface YouTubeChannelResponse {
-    items: {
-        id: string;
-        snippet: {
-            title: string;
-            description: string;
-            thumbnails: {
-                default: { url: string };
-                medium: { url: string };
-                high: { url: string };
-            };
-            customUrl?: string;
-        };
-    }[];
-}
+
 
 export const fetchChannelInfo = async (url: string): Promise<Partial<Channel> | null> => {
     const apiKey = getCredential('YOUTUBE_API_KEY');
@@ -57,12 +43,12 @@ export const fetchChannelInfo = async (url: string): Promise<Partial<Channel> | 
 
     try {
         const response = await fetch(
-            `https://www.googleapis.com/youtube/v3/channels?part=snippet&forHandle=${encodeURIComponent(cleanHandle)}&key=${apiKey}`
+            `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&forHandle=${encodeURIComponent(cleanHandle)}&key=${apiKey}`
         );
 
         if (!response.ok) throw new Error(`YouTube API Error: ${response.status}`);
 
-        const data: YouTubeChannelResponse = await response.json();
+        const data: any = await response.json();
 
         if (!data.items || data.items.length === 0) {
             // Fallback: If it was a channel ID that looked like a handle? 
@@ -72,11 +58,14 @@ export const fetchChannelInfo = async (url: string): Promise<Partial<Channel> | 
         }
 
         const snippet = data.items[0].snippet;
+        const statistics = data.items[0].statistics;
 
         return {
             name: snippet.title,
             description: snippet.description.substring(0, 300) + (snippet.description.length > 300 ? '...' : ''),
-            avatarUrl: snippet.thumbnails.medium?.url || snippet.thumbnails.default?.url
+            avatarUrl: snippet.thumbnails.medium?.url || snippet.thumbnails.default?.url,
+            subscriberCount: statistics?.subscriberCount,
+            customUrl: snippet.customUrl
         };
 
     } catch (error) {
@@ -88,21 +77,24 @@ export const fetchChannelInfo = async (url: string): Promise<Partial<Channel> | 
 const fetchChannelById = async (id: string, apiKey: string): Promise<Partial<Channel> | null> => {
     try {
         const response = await fetch(
-            `https://www.googleapis.com/youtube/v3/channels?part=snippet&id=${id}&key=${apiKey}`
+            `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${id}&key=${apiKey}`
         );
 
         if (!response.ok) throw new Error(`YouTube API Error: ${response.status}`);
 
-        const data: YouTubeChannelResponse = await response.json();
+        const data: any = await response.json();
 
         if (!data.items || data.items.length === 0) return null;
 
         const snippet = data.items[0].snippet;
+        const statistics = data.items[0].statistics;
 
         return {
             name: snippet.title,
             description: snippet.description.substring(0, 300) + (snippet.description.length > 300 ? '...' : ''),
-            avatarUrl: snippet.thumbnails.medium?.url || snippet.thumbnails.default?.url
+            avatarUrl: snippet.thumbnails.medium?.url || snippet.thumbnails.default?.url,
+            subscriberCount: statistics?.subscriberCount,
+            customUrl: snippet.customUrl
         };
     } catch (error) {
         console.error('Failed to fetch channel by ID:', error);
@@ -110,41 +102,54 @@ const fetchChannelById = async (id: string, apiKey: string): Promise<Partial<Cha
     }
 }
 
-export const fetchVideoInfo = async (url: string): Promise<{ title: string, thumbnailUrl: string, channelTitle: string } | null> => {
-    const apiKey = getCredential('YOUTUBE_API_KEY');
-    if (!apiKey) return null;
-
-    let videoId = '';
+const extractVideoId = (url: string): string | null => {
     try {
         const urlObj = new URL(url);
         if (urlObj.hostname.includes('youtu.be')) {
-            videoId = urlObj.pathname.slice(1);
+            return urlObj.pathname.slice(1);
         } else if (urlObj.hostname.includes('youtube.com')) {
-            videoId = urlObj.searchParams.get('v') || '';
+            return urlObj.searchParams.get('v');
         }
     } catch {
         return null;
     }
+    return null;
+};
 
+export const fetchVideoInfo = async (url: string): Promise<{ title: string; thumbnailUrl: string; channelTitle: string } | null> => {
+    const videoId = extractVideoId(url);
     if (!videoId) return null;
 
     try {
-        const response = await fetch(
-            `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoId}&key=${apiKey}`
-        );
-        if (!response.ok) throw new Error('Failed to fetch video');
+        // 1. Try NoEmbed first for metadata (Title, Author)
+        try {
+            const response = await fetch(`https://noembed.com/embed?url=https://www.youtube.com/watch?v=${videoId}`);
+            const data = await response.json();
 
-        const data = await response.json();
-        if (!data.items || data.items.length === 0) return null;
+            if (data && !data.error) {
+                // Use high-res thumbnail by default
+                const thumbnailUrl = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
 
-        const snippet = data.items[0].snippet;
+                return {
+                    title: data.title,
+                    thumbnailUrl: thumbnailUrl,
+                    channelTitle: data.author_name
+                };
+            }
+        } catch (e) {
+            console.warn('NoEmbed failed, falling back to basic info', e);
+        }
+
+        // 2. Fallback: Return basic info with constructed thumbnail
+        // Use hqdefault as it's more likely to exist if maxres doesn't
         return {
-            title: snippet.title,
-            thumbnailUrl: snippet.thumbnails.maxres?.url || snippet.thumbnails.high?.url || snippet.thumbnails.medium?.url,
-            channelTitle: snippet.channelTitle
+            title: `Video ${videoId}`,
+            thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+            channelTitle: 'Unknown Channel'
         };
-    } catch (e) {
-        console.error(e);
+
+    } catch (error) {
+        console.error('Error fetching video info:', error);
         return null;
     }
 };
@@ -163,5 +168,3 @@ export const fetchTranscript = async (url: string): Promise<string | null> => {
         return null;
     }
 };
-
-

@@ -6,20 +6,85 @@ const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Helper: Common request logic
+const callGemini = async (prompt: string, apiKey: string, retries = 0): Promise<string> => {
+    const maxRetries = 3;
+    try {
+        const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: { temperature: 0.7, maxOutputTokens: 8192 },
+            }),
+        });
+
+        if (response.status === 429) {
+            retries++;
+            const delay = Math.pow(2, retries) * 1000;
+            console.warn(`Rate limit hit (429). Retrying in ${delay}ms... (Attempt ${retries}/${maxRetries})`);
+            await wait(delay);
+            return callGemini(prompt, apiKey, retries);
+        }
+
+        if (!response.ok) throw new Error(`API error: ${response.status}`);
+
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        if (!text) throw new Error('Empty response from API');
+        return text;
+
+    } catch (error: any) {
+        if (retries < maxRetries && (!error.message || !error.message.includes('429'))) {
+            // Optional: retry logic for other errors if needed, for now just rethrow
+            throw error;
+        }
+        throw error;
+    }
+};
+
+export const generateQuickSummary = async (
+    title: string,
+    lang: Language,
+    transcript?: string
+): Promise<string> => {
+    const apiKey = getCredential('GEMINI_API_KEY');
+    if (!apiKey) return lang === 'ja' ? 'APIキーが設定されていません。' : 'API Key missing.';
+
+    const inputData = transcript ? transcript.substring(0, 5000) : `Title: ${title}`;
+
+    const prompt = lang === 'ja'
+        ? `
+        以下の動画内容（またはタイトル）を基に、200文字以内で簡潔に要約してください。
+        重要なポイントを箇条書きではなく、文章でまとめてください。
+        
+        入力データ:
+        ${inputData}
+        `
+        : `
+        Summarize the following video content (or title) concisely in under 200 characters.
+        Do not use bullet points; write as a cohesive sentence or two.
+        
+        Input Data:
+        ${inputData}
+        `;
+
+    return callGemini(prompt, apiKey);
+};
+
 export const generateDeepDive = async (
     videoUrl: string,
     lang: Language,
     transcript?: string
 ): Promise<string> => {
     const apiKey = getCredential('GEMINI_API_KEY');
-
     if (!apiKey) {
         throw new Error(lang === 'ja'
             ? 'Gemini APIが設定されていません。.envファイルを確認してください。'
             : 'Gemini API is not configured. Please check your .env file.');
     }
 
-    const transcriptContext = transcript 
+    const transcriptContext = transcript
         ? (lang === 'ja' ? `以下は動画の文字起こし（字幕）データです。これを基に記事を作成してください。\n\n${transcript.substring(0, 30000)}` : `Here is the transcript of the video. Please base your article on this.\n\n${transcript.substring(0, 30000)}`)
         : (lang === 'ja' ? '文字起こしデータが取得できませんでした。タイトルから推測して記事を作成してください。' : 'Transcript unavailable. Please infer from the title.');
 
@@ -31,18 +96,20 @@ URL: ${videoUrl}
 ${transcriptContext}
 
 指示：
-動画の内容を詳細に分析し、目次付きで、見やすい記事にしてください。
+動画の内容を詳細に分析し、**目次（リンク付き）**を含めた、見やすいMarkdownフォーマットの記事にしてください。
+目次は \`[タイトル](#id)\` そのものではなく、Markdownの標準的な見出し構成を作れば、表示側で自動的にリンクされます。
+ただし、必ず「# 目次」というセクションを冒頭に作成し、記事内の各見出し（##）へのリンクリストを作成してください。
+記述リンク例: \`- [内容](#内容)\`
+
 ハルシネーション（嘘の情報）を含まないよう、提供された文字起こしデータの内容を重視してください。
 
-##出力の構造##
+## 出力の構造 ##
 
-# 記事の目次
+# 目次
+-ここに記事内の各見出しへのリンクを記載
 
-# 要約
-動画の内容を要約して、動画の重要な所を瞬時に理解できるセクション
-
-# 動画の全内容を含む記事部分
-（内容を詳細に記述）
+# （動画のテーマごとの見出し）
+内容を詳細に記述...
 `
         : `
 Please create a detailed article based on the following YouTube video.
@@ -51,74 +118,21 @@ URL: ${videoUrl}
 ${transcriptContext}
 
 Instructions:
-Analyze the video content in detail and create a readable article with a table of contents.
-Prioritize the provided transcript data to avoid hallucinations.
+Analyze the video content in detail and create a readable Markdown article.
+Include a **Table of Contents** at the beginning.
+Strictly adhere to the provided transcript data.
 
 ## Output Structure ##
 
-# Table of Contents using Article Links
+# Table of Contents
+(List links to the sections below, e.g., \`- [Summary](#summary)\`)
 
-# 🎯 Summary
-A section summarizing the video content for instant understanding of the key points.
+# Summary
+A section summarizing the video content for instant understanding.
 
-# 📖 Full Article Section containing Video Content
-(Describe in detail)
+# (Thematic Headings)
+Describe in detail...
 `;
 
-    let retries = 0;
-    const maxRetries = 3;
-
-    while (retries < maxRetries) {
-        try {
-            const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    contents: [
-                        {
-                            parts: [
-                                {
-                                    text: prompt,
-                                },
-                            ],
-                        },
-                    ],
-                    generationConfig: {
-                        temperature: 0.7,
-                        maxOutputTokens: 8192,
-                    },
-                }),
-            });
-
-            if (response.status === 429) {
-                retries++;
-                const delay = Math.pow(2, retries) * 1000; // Exponential backoff: 2s, 4s, 8s
-                console.warn(`Rate limit hit (429). Retrying in ${delay}ms... (Attempt ${retries}/${maxRetries})`);
-                await wait(delay);
-                continue;
-            }
-
-            if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
-            }
-
-            const data = await response.json();
-            const generatedText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-            if (!generatedText) {
-                throw new Error('Empty response from API');
-            }
-
-            return generatedText;
-        } catch (error: any) {
-            // RETHROW immediately if it's not a fetch error or check for network errors if needed
-            // For now, if we exhausted retries or caught a non-429 error that we don't want to retry:
-            if (retries >= maxRetries || (error.message && !error.message.includes('429'))) {
-                throw error;
-            }
-        }
-    }
-    throw new Error('Failed to generate report after retries.');
+    return callGemini(prompt, apiKey);
 };

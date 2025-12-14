@@ -1,23 +1,34 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Letter, Channel } from '../types';
 import { generateDeepDive } from '../services/geminiService';
 import { fetchTranscript } from '../services/youtubeService';
-import { FileText, Loader2, PlayCircle, ChevronDown, ChevronUp, ExternalLink } from 'lucide-react';
+import { FileText, Loader2, PlayCircle, ChevronDown, ChevronUp, ExternalLink, Trash2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import rehypeSlug from 'rehype-slug';
 import { Language, translations } from '../lib/i18n';
 
 interface LetterCardProps {
     letter: Letter;
     channel?: Channel;
+    onUpdateLetter: (letter: Letter) => void;
+    onDelete?: (id: string) => void;
     language: Language;
-    onUpdateLetter: (updatedLetter: Letter) => void;
 }
 
-const LetterCard: React.FC<LetterCardProps> = ({ letter, channel, language, onUpdateLetter }) => {
+export default function LetterCard({ letter, channel, onUpdateLetter, onDelete, language }: LetterCardProps) {
     const [isLoading, setIsLoading] = useState(false);
     const [isExpanded, setIsExpanded] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const t = translations[language];
+
+    const handleDelete = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (window.confirm(language === 'ja' ? '本当に削除しますか？' : 'Are you sure you want to delete this?')) {
+            onDelete?.(letter.id);
+        }
+    };
+
+
 
     const handleDeepDive = async () => {
         if (letter.deepDiveContent) {
@@ -134,6 +145,14 @@ const LetterCard: React.FC<LetterCardProps> = ({ letter, channel, language, onUp
                                     isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />
                                 )}
                             </button>
+
+                            <button
+                                onClick={handleDelete}
+                                className="p-2 text-stone-400 hover:text-red-500 hover:bg-stone-50 rounded-full transition-colors"
+                                title={language === 'ja' ? '削除' : 'Delete'}
+                            >
+                                <Trash2 size={18} />
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -149,7 +168,7 @@ const LetterCard: React.FC<LetterCardProps> = ({ letter, channel, language, onUp
             {isExpanded && letter.deepDiveContent && (
                 <div className="border-t border-stone-200 bg-[#FAFAFA] px-6 py-8 md:px-12 md:py-10 animate-in slide-in-from-top-4 duration-500">
                     <div className="prose prose-stone max-w-none markdown-content">
-                        <ReactMarkdown>
+                        <ReactMarkdown rehypePlugins={[rehypeSlug]}>
                             {letter.deepDiveContent}
                         </ReactMarkdown>
                     </div>
@@ -167,4 +186,4 @@ const LetterCard: React.FC<LetterCardProps> = ({ letter, channel, language, onUp
     );
 };
 
-export default LetterCard;
+// End of component

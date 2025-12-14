@@ -1,13 +1,15 @@
 // 型定義ファイル
 
 export type Language = 'ja' | 'en';
-export type ViewMode = 'register' | 'inbox' | 'channel' | 'generator' | 'settings';
+export type ViewMode = 'inbox' | 'today' | 'channel' | 'register' | 'settings' | 'generator';
 
 export interface Channel {
     id: string;
     name: string;
     avatarUrl?: string;
     description?: string;
+    subscriberCount?: string;
+    customUrl?: string;
 }
 
 export interface Letter {
