@@ -168,3 +168,53 @@ export const fetchTranscript = async (url: string): Promise<string | null> => {
         return null;
     }
 };
+
+export const fetchTodaysVideosForChannel = async (channelId: string): Promise<Array<{ id: string; title: string; thumbnailUrl: string; date: string }> | null> => {
+    const apiKey = getCredential('YOUTUBE_API_KEY');
+    if (!apiKey) return null;
+
+    console.log(`[Auto-Update] Fetching for channel ${channelId}`);
+
+    try {
+        // 1. Get Uploads Playlist ID
+        const channelResponse = await fetch(
+            `https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id=${channelId}&key=${apiKey}`
+        );
+        const channelData = await channelResponse.json();
+        if (!channelData.items || channelData.items.length === 0) {
+            console.warn(`[Auto-Update] No updated channel info found for ${channelId}`);
+            return null;
+        }
+
+        const uploadsPlaylistId = channelData.items[0].contentDetails.relatedPlaylists.uploads;
+        console.log(`[Auto-Update] Uploads Playlist ID: ${uploadsPlaylistId}`);
+
+        // 2. Get recent videos from playlist (Fetch top 10 to cover the day)
+        const playlistResponse = await fetch(
+            `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet,contentDetails&playlistId=${uploadsPlaylistId}&maxResults=10&key=${apiKey}`
+        );
+        const playlistData = await playlistResponse.json();
+
+        if (!playlistData.items || playlistData.items.length === 0) {
+            console.warn(`[Auto-Update] No items in playlist ${uploadsPlaylistId}`);
+            return null;
+        }
+
+        console.log(`[Auto-Update] Fetched ${playlistData.items.length} recent videos. Filtering...`);
+        playlistData.items.forEach((item: any) => {
+            console.log(` - ${item.snippet.title} (${item.snippet.publishedAt})`);
+        });
+
+        // 3. Return mapped items
+        return playlistData.items.map((item: any) => ({
+            id: item.contentDetails.videoId,
+            title: item.snippet.title,
+            thumbnailUrl: item.snippet.thumbnails.maxres?.url || item.snippet.thumbnails.high?.url || item.snippet.thumbnails.default?.url,
+            date: item.snippet.publishedAt
+        }));
+
+    } catch (error) {
+        console.error('Failed to fetch recent videos:', error);
+        return null;
+    }
+};

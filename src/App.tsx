@@ -7,8 +7,8 @@ import { supabase } from './lib/supabase';
 import { Session } from '@supabase/supabase-js';
 import { translations, Language } from './lib/i18n';
 import { getCredential, setStoredCredential, getStoredCredential } from './lib/credentials';
-import { fetchChannelInfo, fetchVideoInfo, fetchTranscript } from './services/youtubeService';
-import { generateQuickSummary } from './services/geminiService';
+import { fetchChannelInfo, fetchVideoInfo, fetchTranscript, fetchTodaysVideosForChannel } from './services/youtubeService';
+import { generateQuickSummary, translateText } from './services/geminiService';
 
 // --- MOCK DATA FOR FALLBACK ---
 const MOCK_CHANNELS_JA: Channel[] = [
@@ -681,6 +681,7 @@ export default function App() {
                     name: c.name,
                     avatarUrl: c.avatar_url,
                     description: c.description,
+                    descriptionJa: c.description_ja, // Map cached translation
                     subscriberCount: c.subscriber_count, // Ideally added to DB
                     customUrl: c.custom_url // Ideally added to DB
                 }));
@@ -743,6 +744,87 @@ export default function App() {
         }
     };
 
+    // --- HELPERS ---
+
+    const saveLetter = async (letter: Letter) => {
+        setLetters(prev => [letter, ...prev]);
+        if (session && supabase) {
+            await supabase.from('letters').insert({
+                id: letter.id,
+                channel_id: letter.channelId,
+                title: letter.title,
+                video_url: letter.videoUrl,
+                thumbnail_url: letter.thumbnailUrl,
+                summary: letter.summary,
+                date: letter.date,
+                is_deep_dive_available: letter.isDeepDiveAvailable,
+                is_read: letter.isRead,
+                deep_dive_content: undefined,
+                user_id: session.user.id
+            });
+        }
+    };
+
+    const checkForUpdates = async () => {
+        if (!channels || channels.length === 0) return;
+
+        // Don't show global loading for background update, 
+        // maybe add a small indicator or just let it pop in.
+        console.log("Checking for updates...");
+
+        for (const channel of channels) {
+            try {
+                const recentVideos = await fetchTodaysVideosForChannel(channel.id);
+                if (recentVideos && recentVideos.length > 0) {
+                    const todayStart = new Date();
+                    todayStart.setHours(0, 0, 0, 0);
+
+                    // Also check yesterday
+                    const yesterdayStart = new Date(todayStart);
+                    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+
+                    // Filter for today's and yesterday's videos
+                    const recentVideosFiltered = recentVideos.filter(v => new Date(v.date) >= yesterdayStart);
+
+                    for (const video of recentVideosFiltered) {
+                        // Check if letter exists for this video ID
+                        const alreadyExists = letters.some(l => l.videoUrl.includes(video.id));
+
+                        if (!alreadyExists) {
+                            const transcript = await fetchTranscript(video.id);
+
+                            const summary = await generateQuickSummary(video.title, language, transcript || undefined);
+
+                            const newLetter: Letter = {
+                                id: crypto.randomUUID(),
+                                channelId: channel.id,
+                                title: video.title,
+                                videoUrl: `https://www.youtube.com/watch?v=${video.id}`,
+                                thumbnailUrl: video.thumbnailUrl,
+                                summary: summary,
+                                date: video.date,
+                                isDeepDiveAvailable: false,
+                                isRead: false
+                            };
+
+                            await saveLetter(newLetter);
+                            console.log(`Generated new letter for ${channel.name}: ${video.title}`);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error(`Error updating channel ${channel.id}`, e);
+            }
+        }
+    };
+
+    // Initial Auto-Check
+    useEffect(() => {
+        if (channels.length > 0 && session) {
+            checkForUpdates();
+        }
+    }, [channels.length, session]); // Check when channels loaded
+
     const handleRegister = async (url: string) => {
         const newId = crypto.randomUUID();
 
@@ -760,9 +842,23 @@ export default function App() {
             name: channelInfo?.name || `Channel from ${url.substring(0, 15)}...`,
             avatarUrl: channelInfo?.avatarUrl || `https://picsum.photos/seed/${newId}/100/100`, // Ensure not null
             description: channelInfo?.description || 'Added via Briefly.',
+            descriptionJa: undefined, // Will be set below after translation
             subscriberCount: channelInfo?.subscriberCount,
             customUrl: channelInfo?.customUrl
         };
+
+        // Translate description to Japanese if it's in English
+        if (newChannel.description) {
+            const hasJapanese = /[\u3040-\u30ff\u4e00-\u9fff]/.test(newChannel.description);
+            if (!hasJapanese) {
+                try {
+                    const translatedDesc = await translateText(newChannel.description, 'ja');
+                    newChannel.descriptionJa = translatedDesc;
+                } catch (e) {
+                    console.warn('Description translation failed:', e);
+                }
+            }
+        }
 
         setChannels(prev => [...prev, newChannel]);
         setActiveView('inbox');
@@ -775,6 +871,7 @@ export default function App() {
                 name: newChannel.name,
                 avatar_url: newChannel.avatarUrl,
                 description: newChannel.description,
+                description_ja: newChannel.descriptionJa,
                 subscriber_count: newChannel.subscriberCount,
                 custom_url: newChannel.customUrl
             });
@@ -793,23 +890,11 @@ export default function App() {
             isDeepDiveAvailable: false,
             isRead: false
         };
-        setLetters(prev => [newLetter, ...prev]);
+        // setLetters call removed as saveLetter handles it
 
-        // Fix Spread: Map explicitly to snake_case for DB
         if (session && supabase) {
-            await supabase.from('letters').insert({
-                id: newLetter.id,
-                channel_id: newLetter.channelId,
-                title: newLetter.title,
-                video_url: newLetter.videoUrl,
-                thumbnail_url: newLetter.thumbnailUrl, // Crucial: Persistence
-                summary: newLetter.summary,
-                date: newLetter.date,
-                is_deep_dive_available: newLetter.isDeepDiveAvailable,
-                is_read: newLetter.isRead,
-                deep_dive_content: undefined, // Usually empty on init
-                user_id: session.user.id
-            });
+            // Use saveLetter helper
+            await saveLetter(newLetter);
         }
     };
 
@@ -831,11 +916,14 @@ export default function App() {
             filtered = filtered.filter(l => l.channelId === selectedChannelId);
         }
 
-        // 3. Filter for Today View
+        // 3. Filter for Today View (Now Recent Letters: Today + Yesterday)
         if (activeView === 'today') {
             const todayStart = new Date();
             todayStart.setHours(0, 0, 0, 0);
-            filtered = filtered.filter(l => new Date(l.date) >= todayStart);
+            const yesterdayStart = new Date(todayStart);
+            yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+
+            filtered = filtered.filter(l => new Date(l.date) >= yesterdayStart);
         }
 
         return filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -942,11 +1030,6 @@ export default function App() {
                             <div className="flex-1">
                                 <div className="flex flex-wrap items-center gap-4 mb-2">
                                     <h1 className="font-serif text-3xl font-bold text-ink leading-tight">{currentChannel.name}</h1>
-                                    {currentChannel.subscriberCount && (
-                                        <span className="bg-stone-100 text-stone-600 px-3 py-1 rounded-full text-xs font-bold tracking-wide">
-                                            {parseInt(currentChannel.subscriberCount).toLocaleString()} Subscribers
-                                        </span>
-                                    )}
                                 </div>
                                 <div className="flex items-center gap-4 mb-4">
                                     {currentChannel.customUrl && (
@@ -959,9 +1042,27 @@ export default function App() {
                                             <Youtube size={16} className="mr-1" /> {currentChannel.customUrl}
                                         </a>
                                     )}
+                                    {currentChannel.subscriberCount && (
+                                        <span className="bg-stone-100 text-stone-600 px-3 py-1 rounded-full text-xs font-bold tracking-wide">
+                                            {(() => {
+                                                const count = parseInt(currentChannel.subscriberCount);
+                                                if (language === 'ja') {
+                                                    if (count >= 100000000) return `チャンネル登録者数 ${(count / 100000000).toFixed(1).replace(/\.0$/, '')}億人`;
+                                                    if (count >= 10000) return `チャンネル登録者数 ${(count / 10000).toFixed(1).replace(/\.0$/, '')}万人`;
+                                                    return `チャンネル登録者数 ${count.toLocaleString()}人`;
+                                                } else {
+                                                    if (count >= 1000000) return `${(count / 1000000).toFixed(1).replace(/\.0$/, '')}M subscribers`;
+                                                    if (count >= 1000) return `${(count / 1000).toFixed(1).replace(/\.0$/, '')}K subscribers`;
+                                                    return `${count.toLocaleString()} subscribers`;
+                                                }
+                                            })()}
+                                        </span>
+                                    )}
                                 </div>
                                 <p className="text-stone-600 text-sm leading-relaxed max-w-2xl">
-                                    {currentChannel.description || 'No description available.'}
+                                    {(language === 'ja' && currentChannel.descriptionJa)
+                                        ? currentChannel.descriptionJa
+                                        : (currentChannel.description || 'No description available.')}
                                 </p>
                             </div>
                         </div>

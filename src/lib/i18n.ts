@@ -56,7 +56,7 @@ interface TranslationStrings {
 export const translations: Record<Language, TranslationStrings> = {
     ja: {
         menu: 'メニュー',
-        today: '今日のレター',
+        today: '直近のレター',
         registerChannel: 'チャンネル登録',
         letterBox: 'レターボックス',
         subscriptions: '登録チャンネル',
@@ -106,7 +106,7 @@ export const translations: Record<Language, TranslationStrings> = {
     },
     en: {
         menu: 'Menu',
-        today: 'Today\'s Letters',
+        today: 'Recent Letters',
         registerChannel: 'Register Channel',
         letterBox: 'Letter Box',
         subscriptions: 'Subscriptions',

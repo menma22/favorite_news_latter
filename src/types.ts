@@ -8,6 +8,7 @@ export interface Channel {
     name: string;
     avatarUrl?: string;
     description?: string;
+    descriptionJa?: string; // Translated Japanese description (cached)
     subscriberCount?: string;
     customUrl?: string;
 }
