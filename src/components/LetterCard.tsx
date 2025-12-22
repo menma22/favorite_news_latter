@@ -44,7 +44,8 @@ export default function LetterCard({ letter, channel, onUpdateLetter, onDelete, 
             let transcript: string | null = null;
             try {
                 console.log(`[DeepDive] Fetching transcript for: ${letter.videoUrl}`);
-                transcript = await fetchTranscript(letter.videoUrl);
+                const transcriptData = await fetchTranscript(letter.videoUrl);
+                transcript = transcriptData ? transcriptData.transcript : null;
                 console.log(`[DeepDive] Transcript result length: ${transcript ? transcript.length : 'null'}`);
                 console.log(`[DeepDive] Transcript preview: ${transcript ? transcript.substring(0, 100) : 'N/A'}`);
             } catch (e) {

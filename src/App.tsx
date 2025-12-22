@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Channel, Letter, ViewMode } from './types';
 import LetterCard from './components/LetterCard';
 import { Plus, Inbox, Search, Youtube, Bell, LogOut, Globe, AlertCircle, CheckCircle2, Eye, EyeOff, ArrowLeft, Settings, Sparkles, Loader2, Trash2 } from 'lucide-react';
@@ -190,6 +190,8 @@ const GeneratorView = ({
     const [url, setUrl] = useState('');
     const [activeLetter, setActiveLetter] = useState<Letter | null>(null);
     const [isGenerating, setIsGenerating] = useState(false);
+    const [transcriptMethod, setTranscriptMethod] = useState<string | null>(null);
+    const [statusMessage, setStatusMessage] = useState<string | null>(null);
     const t = translations[language];
 
     const handleGenerate = async (e: React.FormEvent) => {
@@ -198,6 +200,7 @@ const GeneratorView = ({
 
         setIsGenerating(true);
         setActiveLetter(null);
+        setTranscriptMethod(null); // Reset transcript method
 
         try {
             // 1. Fetch Video Info
@@ -211,11 +214,28 @@ const GeneratorView = ({
 
             // 2. Fetch Transcript (for summary)
             let transcript: string | null = null;
+            let currentTranscriptMethod: string | null = null; // Local variable for this generation
             try {
-                transcript = await fetchTranscript(url);
+                // Step 1: Try standard fetch (fast)
+                setStatusMessage(language === 'ja' ? '字幕データを検索中...' : 'Searching for transcript...');
+                let transcriptResult = await fetchTranscript(url, false); // fallback=false
+
+                // Step 2: If failed, try fallback (slow, with UI feedback)
+                if (!transcriptResult) {
+                    console.log('Standard transcript failed. Switching to audio download fallback...');
+                    setStatusMessage(language === 'ja' ? '字幕が見つかりません。音声をダウンロードして文字起こし中... (数分かかる場合があります)' : 'No transcript found. Downloading and transcribing audio... (This may take a few minutes)');
+                    transcriptResult = await fetchTranscript(url, true); // fallback=true
+                }
+
+                if (transcriptResult) {
+                    transcript = transcriptResult.transcript;
+                    currentTranscriptMethod = transcriptResult.method;
+                }
             } catch (e) {
                 console.warn('Failed to fetch transcript for summary', e);
             }
+            setTranscriptMethod(currentTranscriptMethod); // Update state with the method used
+            setStatusMessage(null); // Clear status message
 
             // 3. Generate Quick Summary
             let summaryText = language === 'ja'
@@ -311,10 +331,20 @@ const GeneratorView = ({
                                 />
                                 <button
                                     type="submit"
-                                    disabled={isGenerating}
-                                    className="px-8 py-4 bg-ink text-white font-bold tracking-wide uppercase text-sm hover:bg-accent transition-colors duration-300 disabled:opacity-70 flex items-center justify-center min-w-[140px]"
+                                    disabled={!url || isGenerating}
+                                    className="w-full bg-slate-900 text-white p-3 rounded-lg font-medium hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200 flex items-center justify-center gap-2"
                                 >
-                                    {isGenerating ? <Loader2 className="animate-spin" /> : t.generate}
+                                    {isGenerating ? (
+                                        <>
+                                            <Loader2 className="animate-spin" size={20} />
+                                            {statusMessage || (language === 'ja' ? '生成中...' : 'Generating...')}
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Sparkles size={20} />
+                                            {language === 'ja' ? 'レターを生成' : 'Generate Letter'}
+                                        </>
+                                    )}
                                 </button>
                             </div>
                         </div>
@@ -322,6 +352,15 @@ const GeneratorView = ({
 
                     {activeLetter ? (
                         <div className="animate-in slide-in-from-bottom-4 duration-700 pb-10">
+                            {transcriptMethod === 'audio_fallback' && (
+                                <div className="mb-4 p-4 bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-sm flex items-start gap-3">
+                                    <Sparkles className="flex-shrink-0 mt-0.5" size={16} />
+                                    <div>
+                                        <p className="font-bold">{language === 'ja' ? '音声データから生成しました' : 'Generated from Audio Data'}</p>
+                                        <p>{language === 'ja' ? '字幕がなかったため、AIが音声を直接聞き取って文字起こしを行いました。' : 'No subtitles found. AI transcribed the audio directly.'}</p>
+                                    </div>
+                                </div>
+                            )}
                             <LetterCard
                                 letter={activeLetter}
                                 language={language}
@@ -633,6 +672,7 @@ export default function App() {
     const [channels, setChannels] = useState<Channel[]>([]);
     const [letters, setLetters] = useState<Letter[]>([]);
     const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
+    const processingVideoIds = useRef<Set<string>>(new Set()); // Track in-flight/processed videos
     const [isLoading, setIsLoading] = useState(true);
 
     // Initialize Language from LocalStorage
@@ -683,7 +723,8 @@ export default function App() {
                     description: c.description,
                     descriptionJa: c.description_ja, // Map cached translation
                     subscriberCount: c.subscriber_count, // Ideally added to DB
-                    customUrl: c.custom_url // Ideally added to DB
+                    customUrl: c.custom_url, // Ideally added to DB
+                    youtubeId: c.youtube_id // Real YouTube ID
                 }));
                 setChannels(mappedChannels);
             } else {
@@ -766,7 +807,7 @@ export default function App() {
     };
 
     const checkForUpdates = async () => {
-        if (!channels || channels.length === 0) return;
+        if (!channels || channels.length === 0 || !supabase) return;
 
         // Don't show global loading for background update, 
         // maybe add a small indicator or just let it pop in.
@@ -774,7 +815,14 @@ export default function App() {
 
         for (const channel of channels) {
             try {
-                const recentVideos = await fetchTodaysVideosForChannel(channel.id);
+                // Use youtubeId for API call if available, otherwise fallback (which likely fails for UUIDs)
+                const apiChannelId = channel.youtubeId || channel.customUrl;
+                if (!apiChannelId) {
+                    console.warn(`[Auto-Update] Missing YouTube ID for channel ${channel.name} (${channel.id}). Skipping.`);
+                    continue;
+                }
+
+                const recentVideos = await fetchTodaysVideosForChannel(apiChannelId);
                 if (recentVideos && recentVideos.length > 0) {
                     const todayStart = new Date();
                     todayStart.setHours(0, 0, 0, 0);
@@ -787,28 +835,68 @@ export default function App() {
                     const recentVideosFiltered = recentVideos.filter(v => new Date(v.date) >= yesterdayStart);
 
                     for (const video of recentVideosFiltered) {
-                        // Check if letter exists for this video ID
-                        const alreadyExists = letters.some(l => l.videoUrl.includes(video.id));
+                        // 1. In-flight check
+                        if (processingVideoIds.current.has(video.id)) {
+                            console.log(`[Auto-Update] Video ${video.id} already processed/processing. Skipping.`);
+                            continue;
+                        }
 
-                        if (!alreadyExists) {
-                            const transcript = await fetchTranscript(video.id);
+                        // 2. State/DB Check (Check local letters state first for speed, but rely on DB ideally if state is stale)
+                        // However, since state might be stale in this closure, we should fetch from DB for critical check or assume letters is somewhat updated.
+                        // Better: Use a reliable check.
 
-                            const summary = await generateQuickSummary(video.title, language, transcript || undefined);
+                        // Let's check DB for this specific video to be absolutely sure
+                        const { data: existingDBLetters } = await supabase
+                            .from('letters')
+                            .select('id')
+                            .eq('video_url', `https://www.youtube.com/watch?v=${video.id}`)
+                            .eq('channel_id', channel.id);
 
-                            const newLetter: Letter = {
-                                id: crypto.randomUUID(),
-                                channelId: channel.id,
-                                title: video.title,
-                                videoUrl: `https://www.youtube.com/watch?v=${video.id}`,
-                                thumbnailUrl: video.thumbnailUrl,
-                                summary: summary,
-                                date: video.date,
-                                isDeepDiveAvailable: false,
-                                isRead: false
-                            };
+                        const existsInDB = existingDBLetters && existingDBLetters.length > 0;
+                        const existsInState = letters.some(l => l.videoUrl.includes(video.id) && l.channelId === channel.id);
 
-                            await saveLetter(newLetter);
-                            console.log(`Generated new letter for ${channel.name}: ${video.title}`);
+                        if (!existsInDB && !existsInState) {
+                            // Mark as processing immediately
+                            processingVideoIds.current.add(video.id);
+
+                            try {
+                                const transcriptData = await fetchTranscript(video.id);
+                                const transcriptText = transcriptData ? transcriptData.transcript : undefined;
+
+                                if (transcriptData?.method === 'audio_fallback') {
+                                    console.log(`[Auto-Update] Video ${video.title} required audio download fallback.`);
+                                    // Could add a toast here if we had one
+                                }
+
+                                const summary = await generateQuickSummary(video.title, language || 'ja', transcriptText);
+
+                                const newLetter: Letter = {
+                                    id: crypto.randomUUID(),
+                                    channelId: channel.id,
+                                    title: video.title,
+                                    videoUrl: `https://www.youtube.com/watch?v=${video.id}`,
+                                    thumbnailUrl: video.thumbnailUrl,
+                                    summary: summary,
+                                    date: video.date,
+                                    isDeepDiveAvailable: false,
+                                    isRead: false
+                                };
+
+                                await saveLetter(newLetter);
+                                console.log(`Generated new letter for ${channel.name}: ${video.title}`);
+
+                                // RATE LIMIT PROTECTION: Wait 5 seconds before next request
+                                await new Promise(resolve => setTimeout(resolve, 5000));
+
+                            } catch (err) {
+                                console.error(`Failed to generate letter for ${video.id}. Likely missing transcript or API limit.`, err);
+                                // Optional: remove from processing ref if failed to allow retry? 
+                                // For now, keep it to prevent infinite error loops.
+                            }
+                        } else {
+                            console.log(`[Auto-Update] Letter for ${video.title} already exists. Skipping.`);
+                            // Add to processed set to skip strictly next time
+                            processingVideoIds.current.add(video.id);
                         }
                     }
                 }
@@ -844,7 +932,8 @@ export default function App() {
             description: channelInfo?.description || 'Added via Briefly.',
             descriptionJa: undefined, // Will be set below after translation
             subscriberCount: channelInfo?.subscriberCount,
-            customUrl: channelInfo?.customUrl
+            customUrl: channelInfo?.customUrl,
+            youtubeId: channelInfo?.youtubeId
         };
 
         // Translate description to Japanese if it's in English
@@ -873,7 +962,8 @@ export default function App() {
                 description: newChannel.description,
                 description_ja: newChannel.descriptionJa,
                 subscriber_count: newChannel.subscriberCount,
-                custom_url: newChannel.customUrl
+                custom_url: newChannel.customUrl,
+                youtube_id: newChannel.youtubeId
             });
             if (error) console.error("Error saving channel:", error);
         }

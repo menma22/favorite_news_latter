@@ -65,7 +65,8 @@ export const fetchChannelInfo = async (url: string): Promise<Partial<Channel> | 
             description: snippet.description.substring(0, 300) + (snippet.description.length > 300 ? '...' : ''),
             avatarUrl: snippet.thumbnails.medium?.url || snippet.thumbnails.default?.url,
             subscriberCount: statistics?.subscriberCount,
-            customUrl: snippet.customUrl
+            customUrl: snippet.customUrl,
+            youtubeId: data.items[0].id
         };
 
     } catch (error) {
@@ -94,7 +95,8 @@ const fetchChannelById = async (id: string, apiKey: string): Promise<Partial<Cha
             description: snippet.description.substring(0, 300) + (snippet.description.length > 300 ? '...' : ''),
             avatarUrl: snippet.thumbnails.medium?.url || snippet.thumbnails.default?.url,
             subscriberCount: statistics?.subscriberCount,
-            customUrl: snippet.customUrl
+            customUrl: snippet.customUrl,
+            youtubeId: data.items[0].id
         };
     } catch (error) {
         console.error('Failed to fetch channel by ID:', error);
@@ -154,15 +156,26 @@ export const fetchVideoInfo = async (url: string): Promise<{ title: string; thum
     }
 };
 
-export const fetchTranscript = async (url: string): Promise<string | null> => {
+export const fetchTranscript = async (url: string, allowFallback: boolean = true): Promise<{ transcript: string; method: string } | null> => {
     try {
-        // Use local proxy server
-        const response = await fetch(`http://localhost:3001/transcript?url=${encodeURIComponent(url)}`);
+        const apiKey = getCredential('GEMINI_API_KEY') || '';
+
+        // Use local proxy server, pass fallback param
+        const response = await fetch(`http://localhost:3001/transcript?url=${encodeURIComponent(url)}&fallback=${allowFallback}`, {
+            headers: {
+                'X-Gemini-API-Key': apiKey
+            }
+        });
+
         if (!response.ok) {
+            // If fallback=false and 404, return null gracefully (or throw specific error)
+            if (response.status === 404 && !allowFallback) {
+                return null;
+            }
             throw new Error(`Proxy error: ${response.status}`);
         }
         const data = await response.json();
-        return data.transcript;
+        return { transcript: data.transcript, method: data.method || 'standard' };
     } catch (error) {
         console.error('Failed to fetch transcript via proxy:', error);
         return null;

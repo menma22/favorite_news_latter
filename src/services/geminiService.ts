@@ -2,12 +2,52 @@
 import { getCredential } from '../lib/credentials';
 import type { Language } from '../types';
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent';
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+// Throttling configuration
+const MIN_INTERVAL = 4000; // 4 seconds between calls
+let lastCallTime = 0;
+let requestQueue = Promise.resolve();
+
 // Helper: Common request logic
-const callGemini = async (prompt: string, apiKey: string, retries = 0): Promise<string> => {
+const callGemini = (prompt: string, apiKey: string, retries = 0): Promise<string> => {
+    // Wrap in queue to serialize requests
+    return new Promise((resolve, reject) => {
+        requestQueue = requestQueue.then(async () => {
+            const now = Date.now();
+            const timeSinceLast = now - lastCallTime;
+
+            if (timeSinceLast < MIN_INTERVAL) {
+                const waitTime = MIN_INTERVAL - timeSinceLast;
+                console.log(`[Gemini] Throttling: Waiting ${waitTime}ms...`);
+                await wait(waitTime);
+            }
+
+            try {
+                const result = await executeCallGemini(prompt, apiKey, retries);
+                lastCallTime = Date.now(); // Update timestamp AFTER execution starts (or finishes?)
+                // Updating after finish is safer for rate limits that count "in-flight" or "per minute".
+                // But strict "interval between starts" is often what RPM implies.
+                // Let's update `lastCallTime` here to ensure *spacing*.
+                // Actually, if we update it after, the gap is "End of A" to "Start of B".
+                // If we update it before, the gap is "Start of A" to "Start of B".
+                // Let's do "End of A" to "Start of B" to be safer.
+                lastCallTime = Date.now();
+                resolve(result);
+            } catch (error) {
+                lastCallTime = Date.now(); // Ensure we still cooldown after error
+                reject(error);
+            }
+        }).catch(err => {
+            // Catch queue errors if any, though the inner try/catch handles the logical ones
+            reject(err);
+        });
+    });
+};
+
+const executeCallGemini = async (prompt: string, apiKey: string, retries = 0): Promise<string> => {
     const maxRetries = 3;
     try {
         const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
@@ -24,7 +64,7 @@ const callGemini = async (prompt: string, apiKey: string, retries = 0): Promise<
             const delay = Math.pow(2, retries) * 1000;
             console.warn(`Rate limit hit (429). Retrying in ${delay}ms... (Attempt ${retries}/${maxRetries})`);
             await wait(delay);
-            return callGemini(prompt, apiKey, retries);
+            return executeCallGemini(prompt, apiKey, retries);
         }
 
         if (!response.ok) throw new Error(`API error: ${response.status}`);

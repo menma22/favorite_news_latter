@@ -11,6 +11,7 @@ export interface Channel {
     descriptionJa?: string; // Translated Japanese description (cached)
     subscriberCount?: string;
     customUrl?: string;
+    youtubeId?: string; // Real YouTube Channel ID (UC...)
 }
 
 export interface Letter {
