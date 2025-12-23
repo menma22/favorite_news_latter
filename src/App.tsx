@@ -8,7 +8,7 @@ import { Session } from '@supabase/supabase-js';
 import { translations, Language } from './lib/i18n';
 import { getCredential, setStoredCredential, getStoredCredential } from './lib/credentials';
 import { fetchChannelInfo, fetchVideoInfo, fetchTranscript, fetchTodaysVideosForChannel } from './services/youtubeService';
-import { generateQuickSummary, translateText } from './services/geminiService';
+import { translateText, generateFullContent } from './services/geminiService';
 
 // --- MOCK DATA FOR FALLBACK ---
 const MOCK_CHANNELS_JA: Channel[] = [
@@ -28,6 +28,26 @@ const MOCK_CHANNELS_EN: Channel[] = [
 const MOCK_LETTERS_EN: Letter[] = [
     { id: 'l1', channelId: 'c1', title: 'The Potentially Dangerous Non-Linearity of AI', videoUrl: 'https://www.youtube.com/watch?v=1', thumbnailUrl: 'https://picsum.photos/seed/ai-danger/600/340', summary: 'An exploration into how small changes in AI parameters can lead to drastically unexpected behaviors.', date: new Date().toISOString(), isDeepDiveAvailable: false, isRead: false },
 ];
+
+// --- HELPER: Extract Video ID from various YouTube URL formats ---
+const extractVideoIdFromUrl = (url: string): string | null => {
+    try {
+        const urlObj = new URL(url);
+        // youtube.com/watch?v=XXX
+        if (urlObj.hostname.includes('youtube.com')) {
+            return urlObj.searchParams.get('v');
+        }
+        // youtu.be/XXX
+        if (urlObj.hostname.includes('youtu.be')) {
+            return urlObj.pathname.slice(1).split('?')[0];
+        }
+    } catch {
+        // If URL parsing fails, try regex
+        const match = url.match(/(?:v=|\/)([0-9A-Za-z_-]{11})/);
+        if (match) return match[1];
+    }
+    return null;
+};
 
 // --- COMPONENTS ---
 
@@ -237,18 +257,23 @@ const GeneratorView = ({
             setTranscriptMethod(currentTranscriptMethod); // Update state with the method used
             setStatusMessage(null); // Clear status message
 
-            // 3. Generate Quick Summary
+            // 3. Generate Content (Single-Pass: Summary + Deep Dive)
             let summaryText = language === 'ja'
-                ? '要約を生成できませんでした。詳細レポートを作成してください。'
-                : 'Could not generate summary. Please create a detailed report.';
+                ? '要約を作成できませんでした。'
+                : 'Could not generate summary.';
+            let deepDiveText: string | undefined = undefined;
 
             try {
-                const generatedSummary = await generateQuickSummary(videoInfo.title, language, transcript || undefined);
-                if (generatedSummary) {
-                    summaryText = generatedSummary;
+                // Use new single-pass function
+                const fullContent = await generateFullContent(url, videoInfo.title, language, transcript || undefined);
+                if (fullContent) {
+                    summaryText = fullContent.summary;
+                    deepDiveText = fullContent.deepDive;
                 }
             } catch (e) {
-                console.warn('Failed to generate quick summary', e);
+                console.warn('Failed to generate full content', e);
+                // Fallback attempt? Or just leave error state?
+                // If single-pass fails, we could try fallback to simple summary, but for now let's show error or partial.
             }
 
             const tempId = crypto.randomUUID();
@@ -260,7 +285,8 @@ const GeneratorView = ({
                 thumbnailUrl: videoInfo.thumbnailUrl,
                 summary: summaryText,
                 date: new Date().toISOString(),
-                isDeepDiveAvailable: false,
+                isDeepDiveAvailable: !!deepDiveText, // Available immediately
+                deepDiveContent: deepDiveText, // Store immediately
                 isRead: false
             };
 
@@ -800,7 +826,7 @@ export default function App() {
                 date: letter.date,
                 is_deep_dive_available: letter.isDeepDiveAvailable,
                 is_read: letter.isRead,
-                deep_dive_content: undefined,
+                deep_dive_content: letter.deepDiveContent, // Now properly saves deep dive
                 user_id: session.user.id
             });
         }
@@ -823,6 +849,8 @@ export default function App() {
                 }
 
                 const recentVideos = await fetchTodaysVideosForChannel(apiChannelId);
+                console.log(`[Auto-Update] Channel ${channel.name}: Found ${recentVideos?.length || 0} recent videos from API`);
+
                 if (recentVideos && recentVideos.length > 0) {
                     const todayStart = new Date();
                     todayStart.setHours(0, 0, 0, 0);
@@ -833,6 +861,7 @@ export default function App() {
 
                     // Filter for today's and yesterday's videos
                     const recentVideosFiltered = recentVideos.filter(v => new Date(v.date) >= yesterdayStart);
+                    console.log(`[Auto-Update] After date filter: ${recentVideosFiltered.length} videos (from ${yesterdayStart.toISOString()})`);
 
                     for (const video of recentVideosFiltered) {
                         // 1. In-flight check
@@ -841,46 +870,88 @@ export default function App() {
                             continue;
                         }
 
-                        // 2. State/DB Check (Check local letters state first for speed, but rely on DB ideally if state is stale)
-                        // However, since state might be stale in this closure, we should fetch from DB for critical check or assume letters is somewhat updated.
-                        // Better: Use a reliable check.
+                        // 1.5. Skip Shorts (titles often contain #Shorts or video is from Shorts shelf)
+                        if (video.title.toLowerCase().includes('#shorts') || video.title.toLowerCase().includes('#short')) {
+                            console.log(`[Auto-Update] Video "${video.title}" appears to be a Short. Skipping.`);
+                            processingVideoIds.current.add(video.id);
+                            continue;
+                        }
 
-                        // Let's check DB for this specific video to be absolutely sure
-                        const { data: existingDBLetters } = await supabase
+                        // 1.6. Skip videos under 3 minutes (180 seconds)
+                        if (video.durationSeconds && video.durationSeconds < 180) {
+                            console.log(`[Auto-Update] Video "${video.title}" is too short (${Math.floor(video.durationSeconds / 60)}:${(video.durationSeconds % 60).toString().padStart(2, '0')}). Skipping.`);
+                            processingVideoIds.current.add(video.id);
+                            continue;
+                        }
+
+                        // 2. State/DB Check - Use video ID AND title matching
+                        const { data: existingByUrl } = await supabase
                             .from('letters')
                             .select('id')
-                            .eq('video_url', `https://www.youtube.com/watch?v=${video.id}`)
+                            .ilike('video_url', `%${video.id}%`)
                             .eq('channel_id', channel.id);
 
-                        const existsInDB = existingDBLetters && existingDBLetters.length > 0;
-                        const existsInState = letters.some(l => l.videoUrl.includes(video.id) && l.channelId === channel.id);
+                        const { data: existingByTitle } = await supabase
+                            .from('letters')
+                            .select('id')
+                            .eq('title', video.title)
+                            .eq('channel_id', channel.id);
+
+                        const existsInDB = (existingByUrl && existingByUrl.length > 0) || (existingByTitle && existingByTitle.length > 0);
+                        // Also check state with extracted video ID AND title comparison
+                        const existsInState = letters.some(l => {
+                            const existingVideoId = extractVideoIdFromUrl(l.videoUrl);
+                            const matchesId = existingVideoId === video.id && l.channelId === channel.id;
+                            const matchesTitle = l.title === video.title && l.channelId === channel.id;
+                            return matchesId || matchesTitle;
+                        });
 
                         if (!existsInDB && !existsInState) {
                             // Mark as processing immediately
                             processingVideoIds.current.add(video.id);
 
                             try {
-                                const transcriptData = await fetchTranscript(video.id);
+                                const videoUrl = `https://www.youtube.com/watch?v=${video.id}`;
+                                const transcriptData = await fetchTranscript(videoUrl);
                                 const transcriptText = transcriptData ? transcriptData.transcript : undefined;
 
                                 if (transcriptData?.method === 'audio_fallback') {
                                     console.log(`[Auto-Update] Video ${video.title} required audio download fallback.`);
-                                    // Could add a toast here if we had one
                                 }
 
-                                const summary = await generateQuickSummary(video.title, language || 'ja', transcriptText);
+                                // Use single-pass generation (summary + deep dive)
+                                const fullContent = await generateFullContent(videoUrl, video.title, language || 'ja', transcriptText);
 
                                 const newLetter: Letter = {
                                     id: crypto.randomUUID(),
                                     channelId: channel.id,
                                     title: video.title,
-                                    videoUrl: `https://www.youtube.com/watch?v=${video.id}`,
+                                    videoUrl: videoUrl,
                                     thumbnailUrl: video.thumbnailUrl,
-                                    summary: summary,
+                                    summary: fullContent.summary,
                                     date: video.date,
-                                    isDeepDiveAvailable: false,
+                                    isDeepDiveAvailable: true, // Available immediately
+                                    deepDiveContent: fullContent.deepDive, // Store immediately
                                     isRead: false
                                 };
+
+                                // Final DB check before save to catch race conditions (check both URL and title)
+                                const { data: finalCheckUrl } = await supabase
+                                    .from('letters')
+                                    .select('id')
+                                    .ilike('video_url', `%${video.id}%`)
+                                    .eq('channel_id', channel.id);
+
+                                const { data: finalCheckTitle } = await supabase
+                                    .from('letters')
+                                    .select('id')
+                                    .eq('title', video.title)
+                                    .eq('channel_id', channel.id);
+
+                                if ((finalCheckUrl && finalCheckUrl.length > 0) || (finalCheckTitle && finalCheckTitle.length > 0)) {
+                                    console.log(`[Auto-Update] Race condition prevented: ${video.title} already exists in DB.`);
+                                    continue;
+                                }
 
                                 await saveLetter(newLetter);
                                 console.log(`Generated new letter for ${channel.name}: ${video.title}`);
@@ -890,11 +961,9 @@ export default function App() {
 
                             } catch (err) {
                                 console.error(`Failed to generate letter for ${video.id}. Likely missing transcript or API limit.`, err);
-                                // Optional: remove from processing ref if failed to allow retry? 
-                                // For now, keep it to prevent infinite error loops.
                             }
                         } else {
-                            console.log(`[Auto-Update] Letter for ${video.title} already exists. Skipping.`);
+                            console.log(`[Auto-Update] Letter for ${video.title} already exists (DB: ${existsInDB}, State: ${existsInState}). Skipping.`);
                             // Add to processed set to skip strictly next time
                             processingVideoIds.current.add(video.id);
                         }
@@ -906,9 +975,11 @@ export default function App() {
         }
     };
 
-    // Initial Auto-Check
+    // Initial Auto-Check - Use ref to prevent double execution in StrictMode
+    const hasAutoUpdatedRef = useRef(false);
     useEffect(() => {
-        if (channels.length > 0 && session) {
+        if (channels.length > 0 && session && !hasAutoUpdatedRef.current) {
+            hasAutoUpdatedRef.current = true;
             checkForUpdates();
         }
     }, [channels.length, session]); // Check when channels loaded

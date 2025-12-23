@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: briefly-api
+    runtime: node
+    buildCommand: npm install
+    startCommand: node server.mjs
+    envVars:
+      - key: NODE_ENV
+        value: production

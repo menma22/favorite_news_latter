@@ -70,8 +70,8 @@ def transcribe_with_gemini(audio_path, api_key):
         # Wait for processing? Usually instant for small files, but good to check state if needed.
         # For Flash and audio uploads, it's typically ready quickly.
         
-        print("[Proxy] Requesting transcription from Gemini 1.5 Flash...")
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        print("[Proxy] Requesting transcription from Gemini 2.5 Flash...")
+        model = genai.GenerativeModel("gemini-2.5-flash")
         
         # Prompt specifically for verbatim transcription
         response = model.generate_content(

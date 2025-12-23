@@ -160,8 +160,11 @@ export const fetchTranscript = async (url: string, allowFallback: boolean = true
     try {
         const apiKey = getCredential('GEMINI_API_KEY') || '';
 
+        // Use environment variable for API URL (Render in production, localhost in dev)
+        const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
         // Use local proxy server, pass fallback param
-        const response = await fetch(`http://localhost:3001/transcript?url=${encodeURIComponent(url)}&fallback=${allowFallback}`, {
+        const response = await fetch(`${apiBaseUrl}/transcript?url=${encodeURIComponent(url)}&fallback=${allowFallback}`, {
             headers: {
                 'X-Gemini-API-Key': apiKey
             }
@@ -182,7 +185,7 @@ export const fetchTranscript = async (url: string, allowFallback: boolean = true
     }
 };
 
-export const fetchTodaysVideosForChannel = async (channelId: string): Promise<Array<{ id: string; title: string; thumbnailUrl: string; date: string }> | null> => {
+export const fetchTodaysVideosForChannel = async (channelId: string): Promise<Array<{ id: string; title: string; thumbnailUrl: string; date: string; durationSeconds: number }> | null> => {
     const apiKey = getCredential('YOUTUBE_API_KEY');
     if (!apiKey) return null;
 
@@ -213,18 +216,46 @@ export const fetchTodaysVideosForChannel = async (channelId: string): Promise<Ar
             return null;
         }
 
-        console.log(`[Auto-Update] Fetched ${playlistData.items.length} recent videos. Filtering...`);
-        playlistData.items.forEach((item: any) => {
-            console.log(` - ${item.snippet.title} (${item.snippet.publishedAt})`);
+        console.log(`[Auto-Update] Fetched ${playlistData.items.length} recent videos. Fetching durations...`);
+
+        // 3. Get video IDs and fetch their durations
+        const videoIds = playlistData.items.map((item: any) => item.contentDetails.videoId).join(',');
+        const videosResponse = await fetch(
+            `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=${apiKey}`
+        );
+        const videosData = await videosResponse.json();
+
+        // Create a map of videoId -> duration in seconds
+        const durationMap: { [key: string]: number } = {};
+        if (videosData.items) {
+            videosData.items.forEach((item: any) => {
+                // Parse ISO 8601 duration (e.g., PT1H2M3S, PT5M30S, PT45S)
+                const duration = item.contentDetails.duration;
+                const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+                if (match) {
+                    const hours = parseInt(match[1] || '0');
+                    const minutes = parseInt(match[2] || '0');
+                    const seconds = parseInt(match[3] || '0');
+                    durationMap[item.id] = hours * 3600 + minutes * 60 + seconds;
+                }
+            });
+        }
+
+        // 4. Return mapped items with duration
+        const result = playlistData.items.map((item: any) => {
+            const videoId = item.contentDetails.videoId;
+            const durationSeconds = durationMap[videoId] || 0;
+            console.log(` - ${item.snippet.title} (${item.snippet.publishedAt}) [${Math.floor(durationSeconds / 60)}:${(durationSeconds % 60).toString().padStart(2, '0')}]`);
+            return {
+                id: videoId,
+                title: item.snippet.title,
+                thumbnailUrl: item.snippet.thumbnails.maxres?.url || item.snippet.thumbnails.high?.url || item.snippet.thumbnails.default?.url,
+                date: item.snippet.publishedAt,
+                durationSeconds: durationSeconds
+            };
         });
 
-        // 3. Return mapped items
-        return playlistData.items.map((item: any) => ({
-            id: item.contentDetails.videoId,
-            title: item.snippet.title,
-            thumbnailUrl: item.snippet.thumbnails.maxres?.url || item.snippet.thumbnails.high?.url || item.snippet.thumbnails.default?.url,
-            date: item.snippet.publishedAt
-        }));
+        return result;
 
     } catch (error) {
         console.error('Failed to fetch recent videos:', error);

@@ -2,7 +2,7 @@
 import { getCredential } from '../lib/credentials';
 import type { Language } from '../types';
 
-const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash:generateContent';
+const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent';
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -143,6 +143,8 @@ ${transcriptContext}
 
 ハルシネーション（嘘の情報）を含まないよう、提供された文字起こしデータの内容のみを忠実に再現してください。
 また、この指示に対する記事とは関係のない返答はなしで、いきなり記事から始まる文章を出力してください。
+内容は細かな部分まで動画の文字起こしの内容を反映させ、絶対に省略したりしないでください。動画を見ているときと同じ情報量を得られることが目的だからです。
+
 ## 出力の構造 ##
 
 # 目次
@@ -175,6 +177,70 @@ Describe in detail...
 `;
 
     return callGemini(prompt, apiKey);
+};
+
+// --- NEW Single-Pass Generation ---
+export const generateFullContent = async (
+    videoUrl: string,
+    title: string,
+    lang: Language,
+    transcript?: string
+): Promise<{ summary: string; deepDive: string }> => {
+    const apiKey = getCredential('GEMINI_API_KEY');
+    if (!apiKey) throw new Error('API Key missing');
+
+    const inputData = transcript
+        ? (lang === 'ja' ? `以下は動画の文字起こし（字幕）データです。\n\n${transcript.substring(0, 50000)}` : `Here is the transcript of the video.\n\n${transcript.substring(0, 50000)}`)
+        : `Title: ${title}\nURL: ${videoUrl}\n(No transcript available, infer from title)`;
+
+    const systemInstruction = lang === 'ja'
+        ? `
+        あなたは優秀な編集者です。また、JSONのみを出力するAPIでもあります。
+        提供された動画データ（字幕またはタイトル）を分析し、以下の2つを生成してください。
+        
+        1. **summary**: 200文字以内の簡潔な要約（箇条書き不可）。
+        2. **deepDive**: 詳細なブログ記事（Markdown形式）。目次を含み、見出し構成をしっかり作る。
+
+        出力は**必ず以下のJSON形式**で、それ以外の文字列（マークダウンの囲み \`\`\`json 等）は極力含めないでください（含んでも良いが、パース可能なこと）。
+
+        Format:
+        {
+            "summary": "要約テキスト...",
+            "deepDive": "# 目次\\n- [項目](#id)...\\n\\n# 見出し..."
+        }
+        `
+        : `
+        You are an expert editor and a JSON API.
+        Analyze the provided video data and generate two items:
+        1. **summary**: Concise summary under 200 characters (no bullet points).
+        2. **deepDive**: Detailed blog post in Markdown format with Table of Contents.
+
+        Output **ONLY valid JSON** in the following format:
+        {
+            "summary": "Summary text...",
+            "deepDive": "# Table of Contents\\n..."
+        }
+        `;
+
+    const prompt = `
+    ${systemInstruction}
+
+    [Input Data]
+    ${inputData}
+    `;
+
+    const jsonString = await callGemini(prompt, apiKey);
+
+    // Parse JSON (handle potential markdown code blocks)
+    try {
+        const cleanJson = jsonString.replace(/```json/g, '').replace(/```/g, '').trim();
+        return JSON.parse(cleanJson);
+    } catch (e) {
+        console.error("JSON Parse Error", e);
+        console.log("Raw Output:", jsonString);
+        // Fallback: If parsing fails, try to return raw text as summary, empty deep dive
+        return { summary: jsonString.substring(0, 200) + '...', deepDive: jsonString };
+    }
 };
 
 /**
